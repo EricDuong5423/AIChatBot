@@ -1,0 +1,12 @@
+# Core Pipecat với Ollama (OpenAI-compatible backend)
+pipecat-ai[openai]>=0.0.50
+
+# HTTP server
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+
+# MongoDB async driver
+motor>=3.3.0
+
+# Tiện ích
+python-dotenv>=1.0.0
