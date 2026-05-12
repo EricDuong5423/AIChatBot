@@ -2,3 +2,7 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Frontend build artifacts
+frontend/node_modules/
+dist/

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: hcmut-chatbot
+    env: python
+    buildCommand: pip install -r requirements.txt && cd frontend && npm ci && npm run build
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: OLLAMA_BASE_URL
+        sync: false
+      - key: OLLAMA_MODEL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        sync: false
+      - key: CHATBOT_API_KEY
+        sync: false
+      - key: CHATBOT_ALLOWED_ORIGINS
+        sync: false

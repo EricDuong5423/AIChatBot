@@ -9,12 +9,15 @@ Pipecat-based chatbot API that serves as a virtual assistant for buildings at HC
 ## File Structure
 
 ```
-api.py                  — FastAPI server (chat + buildings CRUD endpoints)
+api.py                  — FastAPI server (chat + buildings CRUD + serves frontend)
 bot.py                  — Pipecat pipeline, tool schemas, run_chatbot()
 auth.py                 — API key verification (dùng chung cho api.py và routers)
 database.py             — Motor async MongoDB client + CRUD functions
 routers/buildings.py    — FastAPI router: GET/POST/PUT/DELETE /buildings
 seed_buildings.py       — Script đổ dữ liệu mẫu vào MongoDB (chạy 1 lần)
+frontend/               — Vue 3 + Vite dashboard (Chat Test + Buildings CRUD)
+dist/                   — Frontend build output (gitignored, sinh ra khi build)
+render.yaml             — Render deployment config (build + start commands)
 .env                    — Biến môi trường thật (KHÔNG commit)
 .env.example            — Template placeholder (commit được)
 ```
@@ -24,7 +27,12 @@ seed_buildings.py       — Script đổ dữ liệu mẫu vào MongoDB (chạy 
 ```bash
 # 1. Cài Python dependencies
 python -m venv .venv
+
+# Linux/Mac:
 source .venv/bin/activate
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+
 pip install -r requirements.txt
 
 # 2. Cấu hình môi trường
@@ -36,8 +44,22 @@ python seed_buildings.py
 
 # 4. Chạy server — LUÔN dùng uvicorn trong venv
 .venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+# Windows: .venv\Scripts\uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 # Hoặc: python api.py
 ```
+
+## Development & Testing
+
+```bash
+# Chạy backend API
+.venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+
+# Chạy frontend dev server (hot reload, proxy /chat và /buildings → localhost:8000)
+cd frontend && npm run dev
+```
+
+Dùng dashboard tại `http://localhost:5173` để test chat và CRUD buildings.
+Khi deploy, frontend được build vào `dist/` và FastAPI tự serve nó tại `/`.
 
 ## LLM Backend — cấu hình qua .env
 
@@ -88,6 +110,12 @@ OpenAILLMService  ← Groq hoặc Ollama, cùng API
 **Token optimization**: System prompt chỉ chứa index tên tòa nhà. Chi tiết được fetch on-demand qua tool `get_building_info` khi LLM cần → tiết kiệm ~80% token so với nhét full data vào prompt.
 
 **OutputCollector** (`bot.py`): gửi `EndFrame` khi `LLMContextAssistantTimestampFrame` fire VÀ message cuối không phải tool call (tránh tắt pipeline sớm khi LLM đang chờ kết quả tool).
+
+**Response format** của `run_chatbot()`:
+```python
+{"type": "text",       "content": "Tòa A4 có 8 tầng..."}
+{"type": "navigation", "content": {"event": "navigation_triggered", "destination_building": "library"}}
+```
 
 ## Tool Declaration Pattern
 
@@ -161,11 +189,11 @@ else
 - **Thêm tòa nhà**: dùng `POST /buildings` API hoặc thêm vào `seed_buildings.py`
 - **Thêm tool mới**: thêm `FunctionSchema` vào `tools_schema`, `register_function` trong `run_chatbot()`
 - **Đổi model**: sửa `OLLAMA_MODEL` trong `.env`
-- **Deploy**: tạo `Procfile` (`web: uvicorn api:app --host 0.0.0.0 --port $PORT`) → deploy lên Render/Railway (free tier)
+- **Deploy**: `render.yaml` đã cấu hình sẵn — push lên Render, set env vars trong dashboard, deploy
+- **Thêm frontend route**: thêm endpoint vào proxy list trong `frontend/vite.config.js`
 
 ## Important Notes
 
-- **LUÔN chạy uvicorn qua `.venv/bin/uvicorn`**, không dùng system uvicorn (thiếu packages)
+- **LUÔN chạy uvicorn qua venv** — system uvicorn thiếu packages
 - **KHÔNG commit `.env`** — chứa key thật; chỉ commit `.env.example`
-- `OLLamaLLMService` đã được thay bằng `OpenAILLMService` trực tiếp để hỗ trợ cloud API key
 - Groq key bị lộ cần revoke ngay tại console.groq.com và tạo key mới

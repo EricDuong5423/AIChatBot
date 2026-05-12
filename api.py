@@ -17,6 +17,7 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from auth import verify_api_key
@@ -127,6 +128,14 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail="Chatbot pipeline failed")
 
     return result
+
+
+# ============================================================================
+# FRONTEND — serve Vue build (chỉ khi dist/ đã được build)
+# ============================================================================
+_dist = os.path.join(os.path.dirname(__file__), "dist")
+if os.path.isdir(_dist):
+    app.mount("/", StaticFiles(directory=_dist, html=True), name="frontend")
 
 
 # ============================================================================
