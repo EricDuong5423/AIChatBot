@@ -40,14 +40,20 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import ChatPanel from './components/ChatPanel.vue'
 import BuildingsPanel from './components/BuildingsPanel.vue'
 
-const apiKey = ref('')
+const STORAGE_KEY = 'hcmut_api_key'
+const apiKey = ref(localStorage.getItem(STORAGE_KEY) ?? '')
 const activeTab = ref('chat')
 const tabs = [
   { id: 'chat', label: 'Chat Test' },
   { id: 'buildings', label: 'Buildings' },
 ]
+
+watch(apiKey, (val) => {
+  if (val) localStorage.setItem(STORAGE_KEY, val)
+  else localStorage.removeItem(STORAGE_KEY)
+})
 </script>
