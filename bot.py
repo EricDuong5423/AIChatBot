@@ -1,19 +1,3 @@
-"""
-bot.py — Pipecat chatbot pipeline cho trợ lý tòa nhà ĐHBK TP.HCM.
-
-Luồng xử lý:
-  UserMessage → LLMUserContextAggregator → OLLamaLLMService (local)
-      → (text)  LLMAssistantContextAggregator → phản hồi văn bản
-      → (tool)  trigger_navigation handler   → NavigationResult (JSON)
-
-Yêu cầu:
-  - Ollama đang chạy tại http://localhost:11434
-  - Đã pull model hỗ trợ function calling:
-      ollama pull qwen2.5:7b        (khuyên dùng — hỗ trợ tool tốt)
-      ollama pull llama3.1:8b       (lựa chọn thay thế)
-      ollama pull mistral-nemo      (nhanh, nhẹ)
-"""
-
 import asyncio
 import json
 import logging
@@ -40,13 +24,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameProcessor
-
-# ── LLM service — hỗ trợ Ollama local hoặc cloud API (Groq, Together, v.v.) ──
-# Dùng OpenAILLMService trực tiếp để có thể truyền api_key thật cho cloud.
-# Nếu LLM_API_KEY trống → fallback sang "ollama" (cho Ollama local).
 from pipecat.services.openai.llm import OpenAILLMService
-
-# ── Function calling helpers ─────────────────────────────────────────────────
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
@@ -55,15 +33,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-
-# ============================================================================
-# 1. DANH SÁCH TÒA NHÀ — chỉ lấy tên/key cho system prompt (tiết kiệm token)
-# ============================================================================
-
 async def _build_buildings_index() -> str:
     """
-    Chỉ lấy key + tên các tòa nhà để đưa vào system prompt (~10 token/tòa nhà).
-    Chi tiết được fetch on-demand qua tool get_building_info khi LLM cần.
+    Chỉ lấy key + tên các tòa nhà để đưa vào system prompt.
     """
     try:
         buildings = await db_get_all_buildings()
@@ -78,11 +50,6 @@ async def _build_buildings_index() -> str:
     for b in buildings:
         lines.append(f"- key=`{b.get('key')}` → {b.get('ten', b.get('key'))}")
     return "\n".join(lines)
-
-
-# ============================================================================
-# 2. SYSTEM PROMPT
-# ============================================================================
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 Bạn là trợ lý ảo thông minh của Đại học Bách Khoa TP.HCM (HCMUT / BK).
@@ -117,25 +84,9 @@ Thân thiện, ngắn gọn, dùng bullet point khi liệt kê nhiều mục.
 
 
 async def _build_system_prompt() -> str:
-    """Tạo system prompt với index tên tòa nhà (không nhét full data — tiết kiệm token)."""
+    """Tạo system prompt với index tên tòa nhà."""
     buildings_index = await _build_buildings_index()
     return _SYSTEM_PROMPT_TEMPLATE.format(buildings_section=buildings_index)
-
-
-# ============================================================================
-# 3. TOOL SCHEMA — trigger_navigation
-# ============================================================================
-#
-# Pipecat dùng FunctionSchema để mô tả tool theo chuẩn JSON Schema,
-# sau đó wrap vào ToolsSchema để truyền cho LLM service.
-# Đây là cách khai báo PORTABLE (hoạt động với cả Anthropic, OpenAI, Gemini).
-#
-# Các trường bắt buộc:
-#   name        — tên hàm, LLM sẽ dùng tên này để gọi
-#   description — mô tả RÕ RÀNG để LLM biết khi nào cần gọi
-#   properties  — dict[tên_tham_số → {type, description}]
-#   required    — danh sách tham số bắt buộc
-# ============================================================================
 
 navigation_tool = FunctionSchema(
     name="trigger_navigation",
@@ -176,10 +127,6 @@ building_info_tool = FunctionSchema(
 tools_schema = ToolsSchema(standard_tools=[navigation_tool, building_info_tool])
 
 
-# ============================================================================
-# 4. KẾT QUẢ ĐIỀU HƯỚNG (data class dùng như signal giữa pipeline và API)
-# ============================================================================
-
 @dataclass
 class NavigationResult:
     """Kết quả trả về khi trigger_navigation được kích hoạt."""
@@ -191,11 +138,6 @@ class NavigationResult:
             "event": self.status,
             "destination_building": self.destination,
         }
-
-
-# ============================================================================
-# 5. FRAME COLLECTOR — thu thập output từ pipeline
-# ============================================================================
 
 class OutputCollector(FrameProcessor):
     """
@@ -220,9 +162,6 @@ class OutputCollector(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMContextAssistantTimestampFrame):
-            # Kiểm tra message cuối của assistant:
-            # - Nếu là tool call (content rỗng, có tool_calls) → LLM sẽ chạy lại sau khi tool trả kết quả, chưa end.
-            # - Nếu là text thật → end pipeline.
             last_assistant_content = ""
             is_tool_call = False
             if self._context:
@@ -244,7 +183,6 @@ class OutputCollector(FrameProcessor):
     def result(self) -> dict:
         if self.navigation:
             return {"type": "navigation", "content": self.navigation.to_dict()}
-        # Lấy assistant message cuối cùng từ context
         text = ""
         if self._context:
             messages = self._context.messages
@@ -255,63 +193,29 @@ class OutputCollector(FrameProcessor):
         return {"type": "text", "content": text.strip()}
 
 
-# ============================================================================
-# 6. FUNCTION HANDLER — xử lý khi LLM gọi trigger_navigation
-# ============================================================================
-
 async def handle_trigger_navigation(
     params: FunctionCallParams,
     collector: OutputCollector,
     task: PipelineTask,
 ) -> None:
-    """
-    Handler được Pipecat gọi tự động khi LLM phát ra tool_use block
-    với name = "trigger_navigation".
-
-    Tham số nhận được qua params.arguments (dict, đã parse từ JSON):
-      - destination_building: str
-
-    Luồng xử lý:
-      1. Trích xuất destination_building từ arguments.
-      2. Log ra console để debug/audit.
-      3. Lưu NavigationResult vào collector để API layer lấy về.
-      4. Trả kết quả cho LLM qua result_callback (bắt buộc để pipeline
-         không bị treo — Pipecat cần biết tool đã hoàn thành).
-      5. Đẩy EndFrame để kết thúc sớm pipeline (không cần LLM sinh thêm text).
-    """
     destination = params.arguments.get("destination_building", "Không xác định")
-
-    # ── Bước 1: Log ─────────────────────────────────────────────────────────
     logger.info("=" * 60)
     logger.info("🧭 NAVIGATION TRIGGERED")
     logger.info("   destination_building = %s", destination)
     logger.info("=" * 60)
-
-    # ── Bước 2: Lưu kết quả vào collector ───────────────────────────────────
     collector.navigation = NavigationResult(destination=destination)
-
-    # ── Bước 3: Trả kết quả cho LLM (bắt buộc) ──────────────────────────────
-    # result_callback đưa kết quả vào context dưới dạng tool_result message.
-    # Truyền run_llm=False để LLM không sinh thêm phản hồi văn bản sau tool.
-    # API v0.0.105+: run_llm truyền qua FunctionCallResultProperties, không phải kwarg trực tiếp
     await params.result_callback(
         result=json.dumps({"status": "navigation_triggered", "destination": destination}),
         properties=FunctionCallResultProperties(run_llm=False),
     )
-
-    # ── Bước 4: Kết thúc pipeline ────────────────────────────────────────────
     await task.queue_frame(EndFrame())
 
-
-# ============================================================================
-# 6b. FUNCTION HANDLER — get_building_info (tra cứu chi tiết on-demand)
-# ============================================================================
 
 async def handle_get_building_info(params: FunctionCallParams) -> None:
     """
     Handler khi LLM cần chi tiết một tòa nhà.
     Fetch từ DB → trả JSON về cho LLM → LLM dùng data đó để trả lời người dùng.
-    run_llm mặc định = True (LLM tiếp tục sinh câu trả lời sau khi có data).
+    run_llm mặc định = True.
     """
     key = params.arguments.get("key", "").strip()
     logger.info("get_building_info: key=%s", key)
@@ -324,10 +228,6 @@ async def handle_get_building_info(params: FunctionCallParams) -> None:
 
     await params.result_callback(result=result)
 
-
-# ============================================================================
-# 7. HÀM CHÍNH — khởi tạo và chạy pipeline
-# ============================================================================
 
 async def run_chatbot(user_message: str, conversation_history: list[dict]) -> dict:
     """
@@ -343,11 +243,6 @@ async def run_chatbot(user_message: str, conversation_history: list[dict]) -> di
         {"type": "text",       "content": "..."}
         {"type": "navigation", "content": {"event": ..., "destination_building": ...}}
     """
-    # ── LLM service ──────────────────────────────────────────────────────────
-    # Cấu hình qua .env:
-    #   OLLAMA_BASE_URL  — endpoint (Ollama: http://localhost:11434/v1 | Groq: https://api.groq.com/openai/v1)
-    #   OLLAMA_MODEL     — tên model  (Ollama: qwen2.5:7b | Groq: llama-3.3-70b-versatile)
-    #   LLM_API_KEY      — bỏ trống cho Ollama local; điền key cho Groq/Together/v.v.
     api_key = os.getenv("LLM_API_KEY") or "ollama"
     llm = OpenAILLMService(
         base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
@@ -358,10 +253,6 @@ async def run_chatbot(user_message: str, conversation_history: list[dict]) -> di
             temperature=0.3,
         ),
     )
-
-    # ── Context + tools ──────────────────────────────────────────────────────
-    # API mới (v0.0.105+): dùng LLMContext phổ quát, tools gắn vào context.
-    # System prompt được build động từ DB mỗi request.
     system_prompt = await _build_system_prompt()
     messages = [
         {"role": "system", "content": system_prompt},
@@ -371,10 +262,6 @@ async def run_chatbot(user_message: str, conversation_history: list[dict]) -> di
     aggregator_pair = LLMContextAggregatorPair(context)
     user_agg = aggregator_pair.user()
     assistant_agg = aggregator_pair.assistant()
-
-    # ── Pipeline ─────────────────────────────────────────────────────────────
-    # Luồng frame: user_agg → llm → assistant_agg → collector
-    # collector._task được gán sau khi task được tạo bên dưới.
     collector = OutputCollector(task=None, context=context)
     pipeline = Pipeline([user_agg, llm, assistant_agg, collector])
     task = PipelineTask(
@@ -382,12 +269,6 @@ async def run_chatbot(user_message: str, conversation_history: list[dict]) -> di
         params=PipelineParams(allow_interruptions=False),
     )
     collector._task = task
-
-    # ── Đăng ký tool handler ─────────────────────────────────────────────────
-    # register_function(name, handler):
-    #   - name:    phải khớp chính xác với FunctionSchema.name ở trên
-    #   - handler: async callable nhận FunctionCallParams
-    # Pipecat tự động gọi handler này khi LLM phát ra tool_use block.
     llm.register_function(
         "trigger_navigation",
         lambda p: handle_trigger_navigation(p, collector, task),
@@ -397,14 +278,11 @@ async def run_chatbot(user_message: str, conversation_history: list[dict]) -> di
         handle_get_building_info,
     )
 
-    # ── Khởi động pipeline và đẩy tin nhắn đầu vào ──────────────────────────
     runner = PipelineRunner(handle_sigint=False)
 
     async def _push_message():
-        # Thêm tin nhắn user vào context rồi gửi LLMContextFrame để kích hoạt LLM
         context.add_message({"role": "user", "content": user_message})
         await task.queue_frame(LLMContextFrame(context=context))
-        # EndFrame sẽ được gửi sau khi pipeline hoàn thành (từ handler hoặc LLM xong)
 
     await asyncio.gather(
         runner.run(task),
