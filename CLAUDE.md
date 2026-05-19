@@ -14,7 +14,6 @@ bot.py                  — Pipecat pipeline, tool schemas, run_chatbot()
 auth.py                 — API key verification (dùng chung cho api.py và routers)
 database.py             — Motor async MongoDB client + CRUD functions
 routers/buildings.py    — FastAPI router: GET/POST/PUT/DELETE /buildings
-seed_buildings.py       — Script đổ dữ liệu mẫu vào MongoDB (chạy 1 lần)
 frontend/               — Vue 3 + Vite dashboard (Chat Test + Buildings CRUD)
 dist/                   — Frontend build output (gitignored, sinh ra khi build)
 render.yaml             — Render deployment config (build + start commands)
@@ -186,7 +185,7 @@ else
 
 ## Extending
 
-- **Thêm tòa nhà**: dùng `POST /buildings` API hoặc thêm vào `seed_buildings.py`
+- **Thêm tòa nhà**: dùng dashboard tab Buildings hoặc `POST /buildings` API trực tiếp
 - **Thêm tool mới**: thêm `FunctionSchema` vào `tools_schema`, `register_function` trong `run_chatbot()`
 - **Đổi model**: sửa `OLLAMA_MODEL` trong `.env`
 - **Deploy**: `render.yaml` đã cấu hình sẵn — push lên Render, set env vars trong dashboard, deploy
