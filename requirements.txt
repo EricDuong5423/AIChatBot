@@ -1,4 +1,4 @@
-# Core Pipecat với Ollama (OpenAI-compatible backend)
+# Core Pipecat với OpenAI-compatible LLM (DeepSeek / Groq / Ollama / etc.)
 pipecat-ai[openai]>=0.0.50
 
 # HTTP server
@@ -11,22 +11,24 @@ pypdf>=4.0.0
 
 # Tiện ích
 python-dotenv>=1.0.0
-
-# RAG: LangChain + Chroma + HuggingFace embeddings (local, multilingual)
-langchain>=0.3.0
-langchain-community>=0.3.0
-langchain-huggingface>=0.1.0
-langchain-chroma>=0.1.0
-langchain-text-splitters>=0.3.0
-sentence-transformers>=3.0.0
-rank_bm25>=0.2.2              # hybrid retrieval (BM25 keyword + semantic)
-
-# Crawler — Playwright vì hcmut.edu.vn là SPA (JS render)
-# Sau pip install, chạy: python -m playwright install chromium
-playwright>=1.45.0
-beautifulsoup4>=4.12.0
-html2text>=2024.2.26
 requests>=2.31.0
 
-# Web search (Phase 3 — fallback khi RAG không tìm thấy)
+# RAG: LangChain + Chroma. Embedding qua Jina API (không cần local model).
+# (Bỏ sentence-transformers + langchain-huggingface để giảm RAM ~700MB,
+#  tránh kéo theo torch + nvidia-cuda-* — đây là lý do OOM trên Render free tier)
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-chroma>=0.1.0
+langchain-text-splitters>=0.3.0
+rank_bm25>=0.2.2              # hybrid retrieval (BM25 keyword + semantic)
+
+# URL crawl + HTML parse (cho /docs/crawl-url)
+beautifulsoup4>=4.12.0
+html2text>=2024.2.26
+
+# Web search (fallback khi RAG không tìm thấy)
 ddgs>=9.0.0
+
+# OPTIONAL — chỉ cần khi chạy scripts/crawl.py local để re-crawl SPA sites.
+# Không deploy lên Render (Playwright cần Chromium ~280MB).
+# playwright>=1.45.0

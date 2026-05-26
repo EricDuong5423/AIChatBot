@@ -16,9 +16,10 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+import requests
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rank_bm25 import BM25Okapi
 
@@ -26,15 +27,63 @@ from rank_bm25 import BM25Okapi
 DOCS_DIR = "docs"
 CHROMA_DIR = "chroma_db"
 COLLECTION = "hcmut"
-# Vietnamese-specialized bi-encoder by BK AI Lab (HCMUT). 768D, ~540MB.
-# Tốt hơn rõ rệt MiniLM cho query/doc tiếng Việt. Đổi model = phải re-index từ đầu.
-EMBED_MODEL = "bkai-foundation-models/vietnamese-bi-encoder"
+# Jina v3 — multilingual API embedding, 1024D. Free 1M token/tháng tại jina.ai.
+# Lý do dùng API thay vì local model: Render free tier 512MB RAM không đủ
+# cho HF model (~540MB). Jina API: 0 RAM local, chất lượng MTEB top.
+EMBED_MODEL = "jina-embeddings-v3"
+EMBED_DIM = 1024  # Jina v3 default dimension
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
 logger = logging.getLogger(__name__)
 
-_embeddings: Optional[HuggingFaceEmbeddings] = None
+
+# ============================================================================
+# JINA EMBEDDINGS — REST API client, conforms to LangChain Embeddings interface
+# ============================================================================
+
+class JinaEmbeddings(Embeddings):
+    """
+    Jina v3 multilingual embedding via REST API.
+    - Endpoint: https://api.jina.ai/v1/embeddings
+    - Task `retrieval.passage` cho documents, `retrieval.query` cho query
+      (Jina v3 tách 2 mode để optimize asymmetric retrieval)
+    - Batch tối đa 32 texts/request để tránh hit rate limit
+    """
+
+    API_URL = "https://api.jina.ai/v1/embeddings"
+    BATCH_SIZE = 32
+
+    def __init__(self, api_key: str, model: str = EMBED_MODEL):
+        if not api_key:
+            raise RuntimeError("JINA_API_KEY chưa set — đăng ký free tại jina.ai")
+        self.api_key = api_key
+        self.model = model
+
+    def _call(self, texts: list[str], task: str) -> list[list[float]]:
+        results: list[list[float]] = []
+        for i in range(0, len(texts), self.BATCH_SIZE):
+            batch = texts[i : i + self.BATCH_SIZE]
+            resp = requests.post(
+                self.API_URL,
+                json={"model": self.model, "task": task, "input": batch},
+                headers={"Authorization": f"Bearer {self.api_key}",
+                         "Content-Type": "application/json"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+            results.extend(item["embedding"] for item in data)
+        return results
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._call(texts, task="retrieval.passage")
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._call([text], task="retrieval.query")[0]
+
+
+_embeddings: Optional[JinaEmbeddings] = None
 
 # BM25 cache: build từ chunks hiện tại của Chroma. Invalidate khi build_vectorstore.
 _bm25: Optional[BM25Okapi] = None
@@ -42,12 +91,13 @@ _bm25_chunks: list[Document] = []
 _bm25_built_at: float = 0.0  # mtime của chroma_db để detect rebuild
 
 
-def _get_embeddings() -> HuggingFaceEmbeddings:
-    """Lazy init — chỉ load model khi cần (model nặng ~500MB)."""
+def _get_embeddings() -> JinaEmbeddings:
+    """Lazy init Jina embedder. Đọc JINA_API_KEY từ env."""
     global _embeddings
     if _embeddings is None:
-        logger.info("Loading embedding model: %s", EMBED_MODEL)
-        _embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+        api_key = os.getenv("JINA_API_KEY", "").strip()
+        logger.info("Initializing Jina embedder: %s", EMBED_MODEL)
+        _embeddings = JinaEmbeddings(api_key=api_key, model=EMBED_MODEL)
     return _embeddings
 
 

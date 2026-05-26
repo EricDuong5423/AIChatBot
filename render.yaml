@@ -35,6 +35,11 @@ services:
       - key: LLM_API_KEY
         sync: false   # set thủ công trong Render dashboard (sk-xxx)
 
+      # ── Embedding (Jina v3 API — không dùng local model, RAM friendly) ────
+      # Đăng ký free 1M token/tháng tại https://jina.ai
+      - key: JINA_API_KEY
+        sync: false
+
       # ── Auth ──────────────────────────────────────────────────────────────
       - key: CHATBOT_API_KEY
         sync: false   # set thủ công, dùng `openssl rand -hex 32` tạo

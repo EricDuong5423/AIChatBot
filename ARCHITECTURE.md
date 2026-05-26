@@ -2,7 +2,7 @@
 
 Tài liệu này giải thích chi tiết cách chatbot HCMUT hoạt động: kiến trúc tổng thể, các thành phần cốt lõi, luồng xử lý 1 câu hỏi, và các quyết định thiết kế.
 
-> **Mục tiêu chatbot**: trợ lý ảo HCMUT có thể (1) trả lời câu hỏi về trường, (2) chỉ đường tới tòa nhà, (3) tìm trên internet khi không có thông tin nội bộ. Output có thể được hiển thị trên web (markdown), Unity (TMP rich text), hoặc plain text.
+> **Mục tiêu chatbot**: trợ lý ảo HCMUT có thể (1) trả lời câu hỏi về trường, (2) chỉ đường tới tòa nhà, (3) tìm trên internet khi không có thông tin nội bộ. Output có thể hiển thị trên web (markdown), Unity (TMP rich text), hoặc plain text.
 
 ---
 
@@ -26,7 +26,7 @@ Tài liệu này giải thích chi tiết cách chatbot HCMUT hoạt động: ki
 | **LLM** | DeepSeek (`deepseek-chat`) qua OpenAI-compatible API | Reasoning + tool calling + text generation |
 | **Pipeline orchestration** | Pipecat | Quản lý dialog flow, tool calling, streaming |
 | **Vector DB** | Chroma (persistent SQLite + HNSW index) | Lưu vector embeddings, similarity search |
-| **Embedding model** | `bkai-foundation-models/vietnamese-bi-encoder` (768D) | Vector hóa tiếng Việt, chạy local CPU |
+| **Embedding** | Jina v3 API (`jina-embeddings-v3`, 1024D, multilingual) | Vector hóa text qua REST API — 0 RAM local, free 1M token/tháng |
 | **Sparse retriever** | BM25Okapi (`rank_bm25`) | Keyword matching, bù điểm yếu của semantic |
 | **Internet search** | DuckDuckGo qua `ddgs` (default) hoặc Tavily | Fallback khi RAG không có data |
 | **Backend** | FastAPI + Uvicorn | HTTP server, REST API |
@@ -42,31 +42,31 @@ Tài liệu này giải thích chi tiết cách chatbot HCMUT hoạt động: ki
 ```mermaid
 graph TB
     subgraph Client["Client Layer"]
-        WEB[Web Dashboard<br/>Vue + marked.js]
-        UNITY[Unity App<br/>TextMeshPro]
-        CSHARP[C# Backend<br/>CO4029_BE]
+        WEB["Web Dashboard<br/>Vue + marked.js"]
+        UNITY["Unity App<br/>TextMeshPro"]
+        CSHARP["C# Backend<br/>CO4029_BE"]
     end
 
-    subgraph API["FastAPI Server (api.py)"]
-        CHAT["/chat<br/>?format=md|tmp|plain"]
-        DOCS["/docs/*<br/>upload, crawl, list, rebuild"]
+    subgraph API["FastAPI Server"]
+        CHAT["POST /chat"]
+        DOCS["/docs/* upload, list, rebuild"]
         HEALTH["/health"]
     end
 
     subgraph Core["Core Logic"]
-        BOT[bot.py<br/>Pipecat pipeline<br/>+ system prompt<br/>+ tool routing]
-        FMT[formatter.py<br/>markdown → tmp/plain]
-        RAG[rag.py<br/>hybrid retrieval]
+        BOT["bot.py<br/>Pipecat pipeline<br/>system prompt + tool routing"]
+        FMT["formatter.py<br/>markdown to tmp/plain"]
+        RAG["rag.py<br/>hybrid retrieval"]
     end
 
     subgraph External["External Services"]
-        DEEPSEEK[DeepSeek API<br/>deepseek-chat]
-        DDG[DuckDuckGo<br/>via ddgs]
+        DEEPSEEK["DeepSeek API<br/>deepseek-chat"]
+        DDG["DuckDuckGo<br/>via ddgs"]
     end
 
     subgraph Storage["Storage"]
-        DOCSDIR[docs/<br/>uploaded/<br/>crawled .md/.txt files]
-        CHROMA[(chroma_db/<br/>vectors + metadata)]
+        DOCSDIR["docs/ folder<br/>uploaded + crawled .md/.txt"]
+        CHROMA[("chroma_db<br/>vectors + metadata")]
     end
 
     WEB --> CHAT
@@ -98,53 +98,53 @@ graph TB
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as User<br/>(Web/Unity)
-    participant API as FastAPI<br/>/chat
-    participant BOT as bot.py<br/>(Pipecat)
+    participant U as User
+    participant API as FastAPI /chat
+    participant BOT as bot.py Pipecat
     participant LLM as DeepSeek API
-    participant TOOL as Tool Handler<br/>(search_info / navigation)
+    participant TOOL as Tool Handler
     participant RAG as rag.py
     participant DDG as DuckDuckGo
 
-    U->>API: POST /chat {message, history, ?format=md/tmp/plain}
+    U->>API: POST /chat (message, history, format)
     API->>BOT: run_chatbot(message, history)
 
-    Note over BOT: Build system prompt<br/>(catalog tòa nhà từ docs/buildings/)
+    Note over BOT: Build system prompt<br/>(catalog tòa nhà từ docs/buildings)
 
-    BOT->>LLM: chat.completions (msg + tools schema)
-    LLM-->>BOT: tool_call: search_info("query") hoặc trigger_navigation("...")
+    BOT->>LLM: chat.completions với tools schema
+    LLM-->>BOT: tool_call search_info hoặc trigger_navigation
 
     alt User hỏi info (search_info)
         BOT->>TOOL: handle_search_info(query)
-        TOOL->>RAG: query_vectorstore(query, k=8)
-        Note over RAG: Hybrid: BM25 + Semantic + RRF
+        TOOL->>RAG: query_vectorstore k=8
+        Note over RAG: Hybrid BM25 + Semantic + RRF
         RAG-->>TOOL: top-8 chunks
-        TOOL->>TOOL: _is_rag_useful(query, hits)?<br/>(≥50% keywords match)
+        TOOL->>TOOL: _is_rag_useful >= 50% keywords?
 
         alt RAG useful
-            TOOL-->>BOT: source="rag", hits
+            TOOL-->>BOT: source=rag hits
         else RAG miss
             TOOL->>DDG: ddgs.text(query, max=2)
             DDG-->>TOOL: top-2 snippets
-            TOOL-->>BOT: source="internet", hits
+            TOOL-->>BOT: source=internet hits
         end
 
-        BOT->>LLM: synthesize answer with tool result
-        LLM-->>BOT: text response (markdown)
+        BOT->>LLM: synthesize answer với tool result
+        LLM-->>BOT: text response markdown
 
     else User yêu cầu chỉ đường (trigger_navigation)
         BOT->>TOOL: handle_trigger_navigation(destination)
-        TOOL->>TOOL: _looks_like_building(dest)?<br/>(reject "Khoa X", "phòng F1.05"...)
+        TOOL->>TOOL: _looks_like_building check guardrail
         alt destination valid
-            TOOL-->>BOT: NavigationResult event<br/>(EndFrame)
+            TOOL-->>BOT: NavigationResult event + EndFrame
         else invalid
-            TOOL-->>LLM: error → LLM retry với text fallback
+            TOOL-->>LLM: error - LLM retry với text fallback
         end
     end
 
-    BOT-->>API: result {type, content}
-    API->>API: convert_format(content, fmt)<br/>md / tmp / plain
-    API-->>U: JSON {type, content}
+    BOT-->>API: result type + content
+    API->>API: convert_format md/tmp/plain
+    API-->>U: JSON type + content
 ```
 
 ### 4.2 Diễn giải từng bước
@@ -171,11 +171,11 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    START[Receive /chat] --> TIMER[Start 30s timer<br/>asyncio.wait_for]
-    TIMER --> PIPELINE[Pipecat pipeline]
-    PIPELINE -->|< 30s| RESULT[Return result]
-    PIPELINE -->|≥ 30s| CANCEL[Cancel task]
-    CANCEL --> FALLBACK["Return text:<br/>Mình chưa phản hồi kịp trong 30s..."]
+    START["Receive /chat"] --> TIMER["Start 30s timer<br/>asyncio.wait_for"]
+    TIMER --> PIPELINE["Pipecat pipeline"]
+    PIPELINE -->|"< 30s"| RESULT["Return result"]
+    PIPELINE -->|">= 30s"| CANCEL["Cancel task"]
+    CANCEL --> FALLBACK["Return text:<br/>Mình chưa phản hồi kịp trong 30s"]
 ```
 
 ---
@@ -186,34 +186,34 @@ LLM quyết định gọi tool nào dựa trên user message:
 
 ```mermaid
 flowchart TD
-    Q[User Message] --> CLASSIFY{User message<br/>có pattern yêu cầu<br/>dẫn đường?<br/>("chỉ đường", "đi đến",<br/>"dẫn tôi"...)}
+    Q["User Message"] --> CLASSIFY{"User message có pattern<br/>yêu cầu dẫn đường?<br/>chỉ đường / đi đến / dẫn tôi"}
 
-    CLASSIFY -->|Có| NAV_RESOLVE{Destination<br/>là TÊN TÒA<br/>hay khoa/phòng?}
-    NAV_RESOLVE -->|Tòa| NAV[trigger_navigation<br/>destination_building=Tòa X]
-    NAV_RESOLVE -->|Khoa/Phòng| NAV_LOOKUP{Có trong<br/>DANH BẠ<br/>system prompt?}
-    NAV_LOOKUP -->|Có| NAV
-    NAV_LOOKUP -->|Không| NAV_SEARCH[search_info<br/>tìm khoa→tòa]
-    NAV_SEARCH --> NAV_OK{Tìm được<br/>tòa cụ thể?}
-    NAV_OK -->|Có| NAV
-    NAV_OK -->|Không| TEXT_NOT_FOUND["Text:<br/>Mình không biết khoa này<br/>ở tòa nào"]
+    CLASSIFY -->|"Có"| NAV_RESOLVE{"Destination là<br/>TÊN TÒA hay khoa/phòng?"}
+    NAV_RESOLVE -->|"Tòa"| NAV["trigger_navigation<br/>destination_building"]
+    NAV_RESOLVE -->|"Khoa/Phòng"| NAV_LOOKUP{"Có trong DANH BẠ<br/>system prompt?"}
+    NAV_LOOKUP -->|"Có"| NAV
+    NAV_LOOKUP -->|"Không"| NAV_SEARCH["search_info tìm khoa to tòa"]
+    NAV_SEARCH --> NAV_OK{"Tìm được tòa cụ thể?"}
+    NAV_OK -->|"Có"| NAV
+    NAV_OK -->|"Không"| TEXT_NF["Text: Mình không biết<br/>khoa này ở tòa nào"]
 
-    CLASSIFY -->|Không| INFO[search_info<br/>query=truy vấn]
-    INFO --> RAG_CHECK{RAG hits<br/>useful?<br/>≥50% keyword match}
-    RAG_CHECK -->|Có| TEXT_RAG["Text trả lời<br/>từ RAG context"]
-    RAG_CHECK -->|Không| INTERNET[DDG search<br/>top-2 snippet]
-    INTERNET --> NET_OK{Có hits?}
-    NET_OK -->|Có| TEXT_NET["Text trả lời<br/>từ internet, cite URL"]
-    NET_OK -->|Không| TEXT_NO_INFO["Text:<br/>Chưa tìm được thông tin"]
+    CLASSIFY -->|"Không"| INFO["search_info<br/>query=truy vấn"]
+    INFO --> RAG_CHECK{"RAG hits useful?<br/>>= 50% keyword match"}
+    RAG_CHECK -->|"Có"| TEXT_RAG["Text trả lời<br/>từ RAG context"]
+    RAG_CHECK -->|"Không"| INTERNET["DDG search<br/>top-2 snippet"]
+    INTERNET --> NET_OK{"Có hits?"}
+    NET_OK -->|"Có"| TEXT_NET["Text trả lời từ internet<br/>cite URL"]
+    NET_OK -->|"Không"| TEXT_NO["Text:<br/>Chưa tìm được thông tin"]
 
-    NAV --> GUARD{Destination<br/>looks like<br/>building?}
-    GUARD -->|Có| NAV_OUTPUT["Output {type:navigation,<br/>destination_building}"]
-    GUARD -->|Không<br/>(có 'khoa', 'phòng', dot)| NAV_REJECT[Reject + tell LLM<br/>fallback text]
-    NAV_REJECT --> TEXT_NOT_FOUND
+    NAV --> GUARD{"Destination looks<br/>like building?"}
+    GUARD -->|"Có"| NAV_OUT["Output type=navigation<br/>destination_building"]
+    GUARD -->|"Không<br/>khoa/phòng/dot"| NAV_REJECT["Reject + tell LLM<br/>fallback text"]
+    NAV_REJECT --> TEXT_NF
 
     style NAV fill:#fef3c7
     style INFO fill:#dbeafe
-    style TEXT_NO_INFO fill:#fee2e2
-    style TEXT_NOT_FOUND fill:#fee2e2
+    style TEXT_NO fill:#fee2e2
+    style TEXT_NF fill:#fee2e2
 ```
 
 ### Tại sao chia 3 luồng?
@@ -226,17 +226,17 @@ flowchart TD
 
 ## 6. RAG Pipeline (Indexing)
 
-### 6.1 Build vector store (offline, chạy 1 lần)
+### 6.1 Build vector store
 
 ```mermaid
 flowchart LR
-    A[docs/**/*.md<br/>docs/**/*.txt] --> B[_load_docs<br/>parse frontmatter<br/>mark is_uploaded]
-    B --> C[Document objects<br/>page_content + metadata]
-    C --> D[RecursiveCharacterTextSplitter<br/>chunk=500, overlap=50]
-    D --> E[Chunks ~150 đoạn]
-    E --> F[HuggingFaceEmbeddings<br/>bkai vietnamese-bi-encoder<br/>local CPU]
-    F --> G[Vector 768D mỗi chunk]
-    G --> H[(Chroma persistent<br/>chroma_db/)]
+    A["docs/*.md<br/>docs/*.txt"] --> B["_load_docs<br/>parse frontmatter<br/>mark is_uploaded"]
+    B --> C["Document objects<br/>page_content + metadata"]
+    C --> D["RecursiveCharacterTextSplitter<br/>chunk=500 overlap=50"]
+    D --> E["Chunks ~150 đoạn"]
+    E --> F["JinaEmbeddings<br/>jina-embeddings-v3 API<br/>batch 32/request"]
+    F --> G["Vector 1024D mỗi chunk"]
+    G --> H[("Chroma persistent<br/>chroma_db/")]
 
     style F fill:#fce7f3
     style H fill:#dbeafe
@@ -244,20 +244,22 @@ flowchart LR
 
 **Chi tiết các bước**:
 
-1. **Load** ([rag.py:_load_docs](rag.py)):
+1. **Load** (`rag.py:_load_docs`):
    - Scan đệ quy `docs/`, lấy mọi `.md` và `.txt`
    - Parse YAML frontmatter (chỉ `.md`)
    - Mark `is_uploaded=true` cho file trong `docs/uploaded/` (để boost sau)
 
-2. **Chunk** ([rag.py:build_vectorstore](rag.py)):
+2. **Chunk** (`rag.py:build_vectorstore`):
    - `RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50, separators=["\n\n", "\n", ". ", " ", ""])`
    - Cố split tại boundary tự nhiên (paragraph > newline > câu > từ)
    - Overlap 50 chars để câu trả lời vắt qua biên không bị cắt
 
 3. **Embed**:
-   - Model: `bkai-foundation-models/vietnamese-bi-encoder` — bi-encoder do BK AI Lab (HCMUT) train, specialized tiếng Việt
-   - Local CPU, không cần API key
-   - Mỗi chunk → 768-dim float vector
+   - Model: `jina-embeddings-v3` — multilingual bi-encoder của Jina AI, MTEB top tier
+   - **Gọi REST API** `https://api.jina.ai/v1/embeddings`, batch 32 chunks/request
+   - Mỗi chunk → 1024-dim float vector
+   - Task mode: `retrieval.passage` cho docs, `retrieval.query` cho query (Jina v3 tách 2 mode để optimize asymmetric retrieval)
+   - **0 RAM local**, không phụ thuộc torch/CUDA → fit Render free tier (512MB)
 
 4. **Store**:
    - Chroma persistent → SQLite + HNSW (Hierarchical Navigable Small World) index
@@ -268,24 +270,24 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    Q[Query: 'Khoa Cơ khí ở tòa nào'] --> SEM[Semantic Search<br/>Chroma similarity<br/>top-2k chunks]
-    Q --> KEY[BM25 keyword<br/>top-2k chunks]
+    Q["Query: Khoa Cơ khí ở tòa nào"] --> SEM["Semantic Search<br/>Chroma similarity<br/>top-2k chunks"]
+    Q --> KEY["BM25 keyword<br/>top-2k chunks"]
 
-    SEM --> RRF[Reciprocal Rank Fusion<br/>score = Σ weight/(60+rank)]
+    SEM --> RRF["Reciprocal Rank Fusion<br/>score = sum weight/(60+rank)"]
     KEY --> RRF
 
-    RRF --> WEIGHTS{Apply<br/>weights}
-    WEIGHTS -->|is_uploaded=true| BOOST[× 2.5]
-    WEIGHTS -->|>40% là links/URLs| PENALTY[× 0.4]
-    WEIGHTS -->|else| NORMAL[× 1.0]
+    RRF --> WEIGHTS{"Apply weights"}
+    WEIGHTS -->|"is_uploaded=true"| BOOST["x 2.5"]
+    WEIGHTS -->|">40% là links/URLs"| PENALTY["x 0.4"]
+    WEIGHTS -->|"else"| NORMAL["x 1.0"]
 
-    BOOST --> MERGE[Merge + dedup<br/>by content prefix]
+    BOOST --> MERGE["Merge + dedup<br/>by content prefix"]
     PENALTY --> MERGE
     NORMAL --> MERGE
 
-    MERGE --> RERANK[_rerank_for_location<br/>nếu query hỏi 'ở tòa nào'<br/>→ boost chunks 'Tòa X là của Y']
-    RERANK --> TOPK[Top-K final chunks]
-    TOPK --> LLM[→ LLM context]
+    MERGE --> RERANK["_rerank_for_location<br/>nếu query hỏi vị trí<br/>boost chunks Tòa X là của Y"]
+    RERANK --> TOPK["Top-K final chunks"]
+    TOPK --> LLM["LLM context"]
 ```
 
 **Vì sao cần Hybrid?**
@@ -298,7 +300,7 @@ flowchart TB
 - **×2.5 cho uploaded**: file user upload có content curated, signal mạnh hơn crawled
 - **×0.4 cho link-heavy chunks**: `hcmut.edu.vn` SPA crawl ra nhiều chunks chỉ là `[link](drive.google.com/...)`. Penalty này giảm noise
 
-**Re-rank** ([bot.py:_rerank_for_location](bot.py)):
+**Re-rank** (`bot.py:_rerank_for_location`):
 - Khi query có pattern "ở tòa nào", boost chunks chứa pattern `Tòa X là của Y`
 - Fix bug LLM nhầm "Xưởng cơ khí C1" với "Khoa Cơ khí ở C1"
 
@@ -309,14 +311,14 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     actor U as User
-    participant FE as Frontend<br/>(DocsPanel.vue)
+    participant FE as Frontend DocsPanel
     participant API as /docs/upload
-    participant FS as Filesystem<br/>(docs/uploaded/)
+    participant FS as Filesystem
     participant BG as Background Task
     participant RAG as build_vectorstore
 
     U->>FE: Drop file (.md/.txt/.pdf) hoặc paste URL
-    FE->>API: POST multipart hoặc {url}
+    FE->>API: POST multipart hoặc JSON url
 
     alt PDF
         API->>API: pypdf extract text
@@ -327,11 +329,11 @@ sequenceDiagram
         API->>FS: Save .md + frontmatter
     else URL crawl
         API->>API: requests + BS4 + html2text
-        API->>FS: Save .md (output html2text là MD)
+        API->>FS: Save .md
     end
 
-    API->>BG: schedule _rebuild_index_safe()
-    API-->>FE: 200 OK {filename, rebuild_scheduled: true}
+    API->>BG: schedule _rebuild_index_safe
+    API-->>FE: 200 OK filename + rebuild_scheduled
 
     BG->>RAG: build_vectorstore()
     Note over RAG: Load all docs<br/>chunk + embed + index
@@ -340,7 +342,7 @@ sequenceDiagram
 
     loop poll every 3s
         FE->>API: GET /docs/rebuild/status
-        API-->>FE: {running, last_at, last_chunks}
+        API-->>FE: running, last_at, last_chunks
     end
 ```
 
@@ -352,27 +354,30 @@ Cùng 1 markdown response, 3 format output khác nhau:
 
 ```mermaid
 flowchart LR
-    LLM[DeepSeek text<br/>markdown] --> CONVERT{format param}
+    LLM["DeepSeek text<br/>markdown"] --> CONVERT{"format param"}
 
-    CONVERT -->|md default| MD["**bold**<br/>- bullet<br/>[link](url)"]
-    CONVERT -->|tmp| TMP["&lt;b&gt;bold&lt;/b&gt;<br/>• bullet<br/>&lt;link='url'&gt;&lt;color&gt;..."]
-    CONVERT -->|plain| PLAIN["bold<br/>• bullet<br/>link"]
+    CONVERT -->|"md default"| MD["bold + bullet + link<br/>markdown raw"]
+    CONVERT -->|"tmp"| TMP["b tags + bullet + link tags<br/>TMP rich text"]
+    CONVERT -->|"plain"| PLAIN["bold bullet link<br/>plain stripped"]
 
-    MD --> WEB[Web Dashboard<br/>marked.js + DOMPurify]
-    TMP --> UNITY[Unity TextMeshPro<br/>tmpText.text = response]
-    PLAIN --> OTHER[Plain text client]
+    MD --> WEB["Web Dashboard<br/>marked.js + DOMPurify"]
+    TMP --> UNITY["Unity TextMeshPro<br/>tmpText.text = response"]
+    PLAIN --> OTHER["Plain text client"]
 
     style TMP fill:#fef3c7
     style MD fill:#dbeafe
 ```
 
-**Conversion regex** ([formatter.py](formatter.py)):
-- `**bold**` → `<b>bold</b>`
-- `*italic*` → `<i>italic</i>`
-- `# H1` → `<size=140%><b>H1</b></size>`
-- `[text](url)` → `<link="url"><color=#2563eb><u>text</u></color></link>` (clickable trong Unity)
-- `- bullet` → `• bullet`
-- `> quote` → `<color=#666666>│ quote</color>`
+**Conversion regex** (`formatter.py`):
+
+| Markdown | TMP rich text |
+|---|---|
+| `**bold**` | `<b>bold</b>` |
+| `*italic*` | `<i>italic</i>` |
+| `# H1` | `<size=140%><b>H1</b></size>` |
+| `[text](url)` | `<link="url"><color=#2563eb><u>text</u></color></link>` |
+| `- bullet` | `• bullet` |
+| `> quote` | `<color=#666666>│ quote</color>` |
 
 ---
 
@@ -386,7 +391,7 @@ flowchart LR
 | [routers/docs.py](routers/docs.py) | Knowledge base CRUD endpoints (upload, crawl URL, rebuild) | ~280 |
 | [formatter.py](formatter.py) | Markdown → TMP rich text / plain converter | ~120 |
 | [auth.py](auth.py) | API key header verification | ~20 |
-| [scripts/crawl.py](scripts/crawl.py) | Playwright crawler cho hcmut.edu.vn SPA | ~160 |
+| [scripts/crawl.py](scripts/crawl.py) | Playwright crawler cho SPA sites | ~160 |
 | [scripts/build_index.py](scripts/build_index.py) | Script CLI gọi `build_vectorstore()` | ~15 |
 | [frontend/](frontend/) | Vue 3 dashboard (Chat + Knowledge Base tabs) | — |
 
@@ -398,12 +403,12 @@ flowchart LR
 |---|---|---|
 | Bot bịa tên tòa khi không biết | Code guardrail `_looks_like_building()` reject "Khoa X", "phòng F1.05" | Prompt-only không đủ — LLM eager. Code-level enforce |
 | Bot ưu tiên RAG generic chunks | Boost uploaded ×2.5 + Link penalty ×0.4 | User-uploaded curated > crawled noise (Drive links spam) |
-| Embedding multilingual yếu Vietnamese | Switch sang BK AI Lab Vietnamese bi-encoder | Specialized model, MTEB tốt hơn |
+| Render free tier 512MB RAM không fit local HF model | Move embedding → Jina v3 API | Free 1M token/tháng, 0 RAM local, MTEB top, không cần torch/CUDA |
 | LLM "lười" không fallback internet | Gộp `search_knowledge` + `search_internet` → 1 `search_info`, code orchestrate fallback | Bypass LLM decision, đảm bảo nhất quán |
 | hcmut.edu.vn là SPA | Dùng Playwright thay vì requests | Body shell rỗng với requests, JS render mới có content |
-| Cold start embed model 10s | `@app.on_event("startup")` warmup + tool timeout 60s | Tránh first request timeout |
+| Cold start nhanh hơn local model | Jina API call ~200ms vs HF model load ~10s | Embed API call có overhead network nhưng không cần load model |
 | Hard timeout request | `asyncio.wait_for(30s)` + cancel task + fallback text | Tránh user đợi vô tận khi LLM/network hang |
-| Multi-client (web/Unity) | `?format=md|tmp|plain` query param, code convert ở api layer | Source of truth = markdown từ LLM, client chỉ định format mong muốn |
+| Multi-client (web/Unity) | `?format=md/tmp/plain` query param, code convert ở api layer | Source of truth = markdown từ LLM, client chỉ định format mong muốn |
 
 ---
 
@@ -412,29 +417,37 @@ flowchart LR
 Câu hỏi quan trọng cho deploy: **vector database được lưu thế nào?**
 
 ### Free tier (mặc định)
+
 - **KHÔNG có persistent disk** — mỗi lần deploy/restart, filesystem reset hoàn toàn
 - Hệ quả:
   - `chroma_db/` (vector index): **bị xóa** → auto rebuild từ `docs/` khi server startup (~10-30s)
   - `docs/uploaded/` (user upload): **bị xóa** nếu không commit vào git
   - `docs/*.md` từ crawl/seed: **giữ** nếu commit vào git
-- Cơ chế tự rebuild ([api.py:_warmup_rag](api.py)):
-  ```python
-  @app.on_event("startup")
-  async def _warmup_rag():
-      if not has_chroma and has_docs:
-          build_vectorstore()   # rebuild từ docs/
-      query_vectorstore("warmup", 1)  # warm embed model
-  ```
-- HF embed model (~540MB) cũng tải lại mỗi cold start → lần deploy đầu **~5 phút**, sau cache layer của Render → nhanh hơn
+- Cơ chế tự rebuild (`api.py:_warmup_rag`):
+
+```python
+@app.on_event("startup")
+async def _warmup_rag():
+    if not has_chroma and has_docs:
+        build_vectorstore()   # rebuild từ docs/ (qua Jina API)
+    query_vectorstore("warmup", 1)  # smoke test Jina endpoint
+```
+
+- **Embedding qua Jina API** (không cần load model local) → cold start nhanh, free tier 512MB RAM vừa đủ
+- Index rebuild 156 chunks: ~5 batch × 32 chunks/batch → 5-7s qua Jina API
+- Cost: ~25K token cho 156 chunks → free tier 1M/tháng cover thoải mái
 
 ### Starter plan ($7/month)
-Bật persistent disk trong [render.yaml](render.yaml) (đã có sẵn block comment):
+
+Bật persistent disk trong `render.yaml` (đã có sẵn block comment):
+
 ```yaml
 disk:
   name: data
   mountPath: /opt/render/project/src/chroma_db
   sizeGB: 1
 ```
+
 → `chroma_db/` persist qua deploys. Có thể thêm disk thứ 2 cho `docs/uploaded/`.
 
 ### Khuyến nghị thực tế
@@ -453,10 +466,11 @@ disk:
 | Hạn chế | Workaround / Note |
 |---|---|
 | Render free tier không persist `docs/uploaded/` + `chroma_db/` | Commit vào git, hoặc upgrade Starter plan |
-| HF embed model ~540MB cold start | Pre-warm ở `api.py:startup`. Render lần deploy đầu chậm ~5 phút |
+| Mỗi query cần 1 round-trip Jina API (~200ms) | Acceptable — tradeoff để fit free tier RAM. Có thể cache embedding nếu cần |
+| Jina free tier 1M token/tháng | Đủ cho ~5K-10K query/tháng. Nếu vượt → upgrade Jina paid ($0.018/1M) hoặc switch provider |
 | PDF extract format kém với tables | `pypdf` cơ bản. PDF tables phức tạp → khuyến nghị convert markdown thủ công trước khi upload |
 | LLM stochastic — đôi khi inconsistent | Bump retry, hoặc dùng `temperature=0` (hiện 0.3) |
-| Tiếng Việt embedding chưa hoàn hảo cho mọi case | Combine BM25 + boost. Vẫn tốt hơn semantic-only |
+| Tiếng Việt RAG chưa hoàn hảo cho mọi case | Combine BM25 + boost + re-rank. Hybrid retrieval gần với SOTA |
 | DDG rate limit / chậm | Switch sang Tavily nếu cần (set `TAVILY_API_KEY`) |
 | Pipeline timeout 30s | Tăng `CHATBOT_TIMEOUT_SECS` nếu chained 2 tool calls quá lâu |
 
@@ -474,9 +488,10 @@ disk:
 
 ### Slide 3: RAG
 - Knowledge base: upload `.md/.txt/.pdf` qua web UI
-- Index: chunk 500 chars → embed BK AI Lab Vietnamese encoder → Chroma
+- Index: chunk 500 chars → embed Jina v3 API (multilingual, 1024D) → Chroma
 - Retrieve: hybrid BM25 + semantic, RRF merge, boost user files
 - Quality: 6/7 query đúng building, 100% query curriculum trả lời đúng số tín chỉ
+- Architecture choice: embedding qua API (Jina free tier) thay vì load local — fit Render 512MB RAM
 
 ### Slide 4: 3 Luồng
 - Luồng 1: Navigation (có guardrail anti-hallucination)
@@ -489,7 +504,9 @@ disk:
 - Unity TextMeshPro render trực tiếp
 
 ### Slide 6: Demo flow
+
 Live demo 4-5 query:
+
 1. "Khoa Cơ khí ở tòa nào" → Tòa B11 (RAG hit, ~2s)
 2. "Chỉ đường tới Khoa Cơ khí" → trigger_navigation Tòa B11 (catalog resolve)
 3. "Hiệu trưởng HCMUT là ai" → search_info auto fallback internet (~4s)
