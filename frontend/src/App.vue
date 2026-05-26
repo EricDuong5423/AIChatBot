@@ -34,7 +34,7 @@
       </div>
 
       <ChatPanel v-if="activeTab === 'chat'" :api-key="apiKey" />
-      <BuildingsPanel v-if="activeTab === 'buildings'" :api-key="apiKey" />
+      <DocsPanel v-if="activeTab === 'docs'" :api-key="apiKey" />
     </div>
   </div>
 </template>
@@ -42,14 +42,14 @@
 <script setup>
 import { ref, watch } from 'vue'
 import ChatPanel from './components/ChatPanel.vue'
-import BuildingsPanel from './components/BuildingsPanel.vue'
+import DocsPanel from './components/DocsPanel.vue'
 
 const STORAGE_KEY = 'hcmut_api_key'
 const apiKey = ref(localStorage.getItem(STORAGE_KEY) ?? '')
 const activeTab = ref('chat')
 const tabs = [
   { id: 'chat', label: 'Chat Test' },
-  { id: 'buildings', label: 'Buildings' },
+  { id: 'docs', label: 'Knowledge Base' },
 ]
 
 watch(apiKey, (val) => {

@@ -29,11 +29,12 @@
           </div>
         </div>
 
-        <!-- Bot text -->
+        <!-- Bot text (markdown rendered) -->
         <div v-else class="flex justify-start">
-          <div class="bg-gray-100 text-gray-800 rounded-2xl rounded-tl-sm px-4 py-2 max-w-md text-sm leading-relaxed whitespace-pre-wrap">
-            {{ msg.content }}
-          </div>
+          <div
+            class="bg-gray-100 text-gray-800 rounded-2xl rounded-tl-sm px-4 py-2 max-w-md text-sm leading-relaxed md-bubble"
+            v-html="renderMd(msg.content)"
+          ></div>
         </div>
       </template>
 
@@ -68,6 +69,24 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+// Markdown options: GFM + tự convert newline thành <br>
+marked.use({ gfm: true, breaks: true })
+
+function renderMd(text) {
+  if (!text) return ''
+  const html = marked.parse(text)
+  // Sanitize HTML — chặn XSS từ AI output (links với javascript:, script tags, etc.)
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'b', 'i', 'u', 's', 'code', 'pre',
+      'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'blockquote', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'del'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'title'],
+    ALLOW_DATA_ATTR: false,
+  })
+}
 
 const props = defineProps({ apiKey: String })
 
@@ -135,3 +154,55 @@ async function scrollDown() {
   if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
 }
 </script>
+
+<style scoped>
+/* Style cho markdown bubble — ghi đè reset Tailwind cho text bot */
+.md-bubble :deep(p) { margin: 0 0 0.5em 0; }
+.md-bubble :deep(p:last-child) { margin-bottom: 0; }
+.md-bubble :deep(ul),
+.md-bubble :deep(ol) { padding-left: 1.25rem; margin: 0.25rem 0; }
+.md-bubble :deep(ul) { list-style: disc; }
+.md-bubble :deep(ol) { list-style: decimal; }
+.md-bubble :deep(li) { margin: 0.15rem 0; }
+.md-bubble :deep(strong) { font-weight: 600; }
+.md-bubble :deep(em) { font-style: italic; }
+.md-bubble :deep(a) { color: #2563eb; text-decoration: underline; }
+.md-bubble :deep(code) {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.1em 0.3em;
+  border-radius: 0.25rem;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+.md-bubble :deep(pre) {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.md-bubble :deep(pre code) { background: transparent; padding: 0; }
+.md-bubble :deep(h1),
+.md-bubble :deep(h2),
+.md-bubble :deep(h3) { font-weight: 600; margin: 0.5rem 0 0.25rem; }
+.md-bubble :deep(h1) { font-size: 1.05em; }
+.md-bubble :deep(h2) { font-size: 1.0em; }
+.md-bubble :deep(h3) { font-size: 0.95em; }
+.md-bubble :deep(blockquote) {
+  border-left: 3px solid #cbd5e1;
+  padding-left: 0.6rem;
+  color: #475569;
+  margin: 0.4rem 0;
+}
+.md-bubble :deep(table) {
+  border-collapse: collapse;
+  margin: 0.4rem 0;
+  font-size: 0.9em;
+}
+.md-bubble :deep(th),
+.md-bubble :deep(td) {
+  border: 1px solid #d1d5db;
+  padding: 0.2rem 0.5rem;
+}
+.md-bubble :deep(hr) { border: 0; border-top: 1px solid #e5e7eb; margin: 0.5rem 0; }
+</style>

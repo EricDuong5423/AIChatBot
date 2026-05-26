@@ -4,22 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Pipecat-based chatbot API that serves as a virtual assistant for buildings at HCMUT (Ho Chi Minh University of Technology). Uses **OpenAI-compatible LLM** (Groq cloud hoặc Ollama local) with function calling. Building data stored in **MongoDB**. Exposed as REST API for C# ASP.NET Core backend (CO4029_BE).
+Pipecat-based chatbot API that serves as a virtual assistant for HCMUT (Ho Chi Minh University of Technology). Uses **OpenAI-compatible LLM** (Groq cloud hoặc Ollama local) with function calling. Building info + HCMUT knowledge stored as **markdown files** indexed via **RAG** (LangChain + Chroma + HuggingFace embeddings). Web search fallback via DuckDuckGo. Exposed as REST API for C# ASP.NET Core backend (CO4029_BE).
+
+**Không còn dùng MongoDB.** Building data nằm trong `docs/buildings/*.md`, được index cùng knowledge base và truy cập qua tool `search_knowledge`.
 
 ## File Structure
 
 ```
-api.py                  — FastAPI server (chat + buildings CRUD + serves frontend)
-bot.py                  — Pipecat pipeline, tool schemas, run_chatbot()
-auth.py                 — API key verification (dùng chung cho api.py và routers)
-database.py             — Motor async MongoDB client + CRUD functions
-routers/buildings.py    — FastAPI router: GET/POST/PUT/DELETE /buildings
-frontend/               — Vue 3 + Vite dashboard (Chat Test + Buildings CRUD)
+api.py                  — FastAPI server (POST /chat + docs router + serves frontend; warmup + auto-rebuild RAG ở startup)
+bot.py                  — Pipecat pipeline, 3 tools, system prompt, run_chatbot()
+auth.py                 — API key verification (X-API-Key header)
+routers/docs.py         — Knowledge base CRUD (upload/list/delete/rebuild)
+formatter.py            — Convert markdown → TMP rich text / plain (cho /chat?format=tmp|plain)
+rag.py                  — LangChain RAG: load docs/ rglob → HF embed → Chroma persistent
+scripts/crawl.py        — Playwright crawler → docs/ (cho SPA — chạy LOCAL khi cần refresh)
+scripts/build_index.py  — Chạy sau crawl/sửa docs: index docs/ → chroma_db/ (alternative: API /docs/rebuild)
+docs/                   — Markdown knowledge base. KHÔNG có file preset — user tự upload qua UI.
+docs/buildings/         — (optional) Building docs với frontmatter building_key+building_name → tự đẩy vào catalog
+docs/uploaded/          — Files user upload qua /docs/upload endpoint
+chroma_db/              — Chroma persistent vector store (gitignored sau khi index)
+frontend/               — Vue 3 + Vite dashboard (Chat Test + Knowledge Base tabs)
 dist/                   — Frontend build output (gitignored, sinh ra khi build)
-render.yaml             — Render deployment config (build + start commands)
-.env                    — Biến môi trường thật (KHÔNG commit)
-.env.example            — Template placeholder (commit được)
+Procfile / runtime.txt  — Cấu hình deploy (Render/Railway): start command + Python version
+render.yaml             — Render Blueprint config (build + start + env vars)
+DEPLOY.md               — Hướng dẫn deploy lên Render
+.env                    — Biến môi trường thật (KHÔNG commit). Set: OLLAMA_BASE_URL, OLLAMA_MODEL, LLM_API_KEY, CHATBOT_API_KEY, CHATBOT_ALLOWED_ORIGINS, CHATBOT_TIMEOUT_SECS, (optional) TAVILY_API_KEY
 ```
+
+Không có test suite (pytest/unittest). Verify thay đổi qua `python bot.py demo` hoặc gọi `/chat` trực tiếp.
 
 ## Setup
 
@@ -34,30 +46,36 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 
-# 2. Cấu hình môi trường
-cp .env.example .env
-# Chỉnh .env: LLM backend, MongoDB URI, API keys
+# 2. Tạo .env (xem env vars cần thiết ở phần File Structure ở trên)
 
-# 3. Đổ dữ liệu mẫu vào MongoDB (chạy 1 lần)
-python seed_buildings.py
+# 3. Crawl + index knowledge base (chạy 1 lần khi setup hoặc khi muốn refresh)
+.venv/bin/python -m playwright install chromium   # ~280MB, lần đầu
+.venv/bin/python scripts/crawl.py                   # Playwright crawl ~14 SPA route → docs/*.md
+.venv/bin/python scripts/build_index.py                   # docs/ + docs/buildings/ → chroma_db/
 
 # 4. Chạy server — LUÔN dùng uvicorn trong venv
 .venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 # Windows: .venv\Scripts\uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 # Hoặc: python api.py
+
+# 5. Debug pipeline KHÔNG cần HTTP (chạy thẳng bot.py):
+python bot.py          # chat tương tác trên terminal
+python bot.py demo     # chạy chuỗi câu test có sẵn (tool calls + text)
 ```
+
+**Thêm/sửa tòa nhà**: tạo/sửa file `docs/buildings/{key}.md` với frontmatter `building_key`, `building_name`, `khoa`, `tang` → chạy lại `scripts/build_index.py`.
 
 ## Development & Testing
 
 ```bash
-# Chạy backend API
+# Chạy backend API (api.py warmup embeddings ở startup event)
 .venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 
-# Chạy frontend dev server (hot reload, proxy /chat và /buildings → localhost:8000)
+# Chạy frontend dev server (hot reload, proxy /chat → localhost:8000)
 cd frontend && npm run dev
 ```
 
-Dùng dashboard tại `http://localhost:5173` để test chat và CRUD buildings.
+Dùng dashboard tại `http://localhost:5173` để test chat.
 Khi deploy, frontend được build vào `dist/` và FastAPI tự serve nó tại `/`.
 
 ## LLM Backend — cấu hình qua .env
@@ -68,8 +86,8 @@ Chỉ cần đổi 3 biến trong `.env`, không sửa code:
 ```env
 # Groq (cloud, miễn phí, ~300 tok/s — khuyên dùng cho production):
 OLLAMA_BASE_URL=https://api.groq.com/openai/v1
-OLLAMA_MODEL=llama-3.3-70b-versatile
-LLM_API_KEY=gsk_xxxx           # lấy tại console.groq.com
+OLLAMA_MODEL=openai/gpt-oss-20b    # tool calling ổn định nhất với 3+ tools
+LLM_API_KEY=gsk_xxxx               # lấy tại console.groq.com
 
 # Ollama local (không cần key):
 # OLLAMA_BASE_URL=http://localhost:11434/v1
@@ -78,6 +96,8 @@ LLM_API_KEY=gsk_xxxx           # lấy tại console.groq.com
 ```
 
 Nếu `LLM_API_KEY` trống → dùng `"ollama"` làm api_key (Ollama local không cần key thật).
+
+**Model choice cho tool calling** (Groq): `llama-3.3-70b-versatile` đôi khi xuất tool call ở format Llama legacy `<function=name{args}</function>` → Groq parser reject ("Failed to call a function"). Dùng `openai/gpt-oss-20b` (OpenAI strict tool format) hoặc `meta-llama/llama-4-scout-17b-16e-instruct` thay thế.
 
 ## Architecture
 
@@ -88,7 +108,7 @@ POST /chat
 run_chatbot(message, history)
     │
     ├── _build_system_prompt()
-    │       └── _build_buildings_index()  ← chỉ lấy key+tên từ DB (~10 token/building)
+    │       └── _build_buildings_index()  ← đọc docs/buildings/*.md frontmatter (sync)
     │
     ▼
 LLMContextAggregatorPair (user + assistant)
@@ -96,17 +116,55 @@ LLMContextAggregatorPair (user + assistant)
     ▼
 OpenAILLMService  ← Groq hoặc Ollama, cùng API
     │
-    ├── tool_use: get_building_info(key)
-    │       └── db_get_building(key) → JSON chi tiết → LLM dùng để trả lời
+    ├── tool_use: trigger_navigation(destination_building)   [LUỒNG 1]
+    │       └── Code guardrail (reject khoa/phòng) → NavigationResult → EndFrame
     │
-    ├── tool_use: trigger_navigation(destination_building)
-    │       └── NavigationResult → collector.navigation → EndFrame
+    ├── tool_use: search_info(query)   [LUỒNG 2 — auto RAG → Internet fallback]
+    │       ├── Step 1: query_vectorstore (Chroma hybrid BM25+semantic, k=8)
+    │       ├── Step 2: _is_rag_useful() — heuristic match >=50% query tokens
+    │       ├── Step 3a: useful → return source="rag" + hits
+    │       └── Step 3b: not useful → DDG search → source="internet" + hits
+    │                  (nếu cả 2 fail → source="none")
     │
-    └── text response
-            └── LLMContextAssistantTimestampFrame → đọc từ context → EndFrame
+    └── text response   [LUỒNG 3 — fallback khi search_info source=none]
+            └── LLM trả "chưa tìm được thông tin"
 ```
 
-**Token optimization**: System prompt chỉ chứa index tên tòa nhà. Chi tiết được fetch on-demand qua tool `get_building_info` khi LLM cần → tiết kiệm ~80% token so với nhét full data vào prompt.
+**RAG pipeline** (offline, chạy 1 lần):
+```
+scripts/crawl.py (Playwright headless Chromium, vì hcmut.edu.vn là SPA)
+    → docs/*.md (YAML frontmatter: source_url, crawled_at)
+docs/buildings/*.md (optional — frontmatter: building_key, building_name, khoa, tang)
+docs/uploaded/*.md (user upload qua UI hoặc API /docs/upload)
+scripts/build_index.py / POST /docs/rebuild → rag.build_vectorstore()
+    → Path.rglob (đệ quy, bao gồm cả subdirs)
+    → RecursiveCharacterTextSplitter (chunk=500, overlap=50)
+    → HuggingFaceEmbeddings (bkai-foundation-models/vietnamese-bi-encoder, local CPU, ~540MB, 768D)
+    → Chroma persistent → chroma_db/
+```
+
+**Embedding model**: BK AI Lab (HCMUT) Vietnamese bi-encoder, specialized cho tiếng Việt — rank top-1 cho query "Khoa X" → file `Tho_ng tin chung` chứa pattern "Tòa Y là của Khoa X". Thay thế `paraphrase-multilingual-MiniLM-L12-v2` cũ (yếu cho Vietnamese keyword matching). **Đổi model = phải re-index từ đầu** (dimension mismatch 384D ↔ 768D), xóa `chroma_db/` rồi chạy lại `scripts/build_index.py`.
+
+**Hybrid retrieval** (`rag.query_vectorstore`): BM25 keyword + dense embedding semantic,
+merge bằng Reciprocal Rank Fusion (RRF). Cần thiết cho tiếng Việt vì embedding
+multilingual MiniLM yếu khi match keyword như "Khoa Cơ khí" với câu chứa cả "Khoa" và
+"Cơ khí" rời nhau. BM25 (rank_bm25) bù điểm yếu này.
+
+Tại request time: `search_knowledge` handler gọi `rag.query_vectorstore(query, k=8)` →
+chạy trong `asyncio.to_thread` (vì Chroma sync) → trả top-8 chunks ≤800 ký tự kèm `source_url` → LLM tổng hợp.
+
+`api.py` có `@app.on_event("startup")` warmup gọi `query_vectorstore("warmup", 1)` để load HF embedding model trước khi nhận traffic — query đầu không timeout.
+
+**3 luồng xử lý** (chỉ 2 tool, fallback do code orchestrate):
+1. **LUỒNG 1**: User yêu cầu dẫn đường → `trigger_navigation`. Pattern: "chỉ đường", "dẫn tôi", "đi đến X làm sao". Có guardrail code-level reject khi destination là khoa/phòng/tiện ích (chứa "khoa ", "phòng ", "canteen", etc.) hoặc format phòng (`F1.05`, `A205`).
+2. **LUỒNG 2**: Mọi câu hỏi thông tin → `search_info(query)`. Handler tự động:
+   - RAG hybrid retrieval (k=8)
+   - Đánh giá `_is_rag_useful()` qua keyword overlap heuristic (>=50% tokens query xuất hiện trong top-3 hits)
+   - Nếu useful → trả source="rag"; không useful → auto fallback DuckDuckGo, source="internet"
+   - Cả 2 fail → source="none"
+3. **LUỒNG 3**: search_info trả source="none" → LLM trả TEXT "chưa tìm được thông tin"
+
+LLM không cần tự quyết "khi nào RAG, khi nào internet" — code handler tự xử lý. Giảm khả năng LLM "lười" stop ở RAG khi RAG không có data.
 
 **OutputCollector** (`bot.py`): gửi `EndFrame` khi `LLMContextAssistantTimestampFrame` fire VÀ message cuối không phải tool call (tránh tắt pipeline sớm khi LLM đang chờ kết quả tool).
 
@@ -135,27 +193,50 @@ async def handler(params: FunctionCallParams):
     )
 ```
 
-## Buildings CRUD API
+## Knowledge Base Management
+
+Có 2 cách thêm knowledge:
+
+### A. Upload qua UI/API (recommended)
+- **UI**: Mở dashboard → tab **Knowledge Base** → kéo-thả file `.md`/`.txt`/`.pdf` (tối đa 20MB)
+- **API**: `POST /docs/upload` (multipart, header `X-API-Key`), tự rebuild background sau upload
+- File lưu vào `docs/uploaded/`, được index cùng các docs khác
+- **Giữ extension gốc**: `.txt` → `.txt`, `.md` → `.md`, `.pdf` → extract text → `.txt` (vì PDF binary không index được)
+- **Boost retrieval**: chunks từ `docs/uploaded/` được boost ×2.5 RRF score (user-curated ưu tiên hơn crawled noise)
+- **Link penalty**: chunks chứa >40% markdown links / URLs bị giảm ×0.4 (tránh Drive link spam từ crawled docs lên top)
+
+### B. Drop file vào `docs/` rồi rebuild index
+- Bất kỳ `.md` nào trong `docs/` (đệ quy) đều được index
+- Chạy `python scripts/build_index.py` sau khi thêm/sửa
+
+### Building catalog (optional)
+Nếu muốn có "DANH BẠ TÒA NHÀ" trong system prompt để LLM trigger_navigation ngay không cần search, tạo file trong `docs/buildings/{key}.md` với frontmatter:
+
+```markdown
+---
+building_key: A4
+building_name: Tòa A4
+khoa: Đào tạo quốc tế (OISP)
+tang: 5
+---
+
+(content tùy ý — sẽ được RAG index như doc khác)
+```
+
+`bot._build_buildings_index()` quét folder này, đẩy `name + khoa + tang` vào system prompt. Để trống folder = catalog rỗng, mọi nav phải qua RAG/internet để xác định tòa.
+
+### Endpoints
 
 | Method | Endpoint | Auth | Mô tả |
 |---|---|---|---|
-| GET | `/buildings` | Không | Liệt kê tất cả |
-| GET | `/buildings/{key}` | Không | Lấy theo key |
-| POST | `/buildings` | X-API-Key | Tạo mới |
-| PUT | `/buildings/{key}` | X-API-Key | Cập nhật |
-| DELETE | `/buildings/{key}` | X-API-Key | Xóa |
+| GET | `/docs` | Không | List file trong `docs/uploaded/` |
+| POST | `/docs/upload` | X-API-Key | Upload .md/.txt/.pdf, auto rebuild |
+| POST | `/docs/crawl-url` | X-API-Key | Fetch URL → extract content → save .md → rebuild. Static HTML only (SPA báo 422). |
+| DELETE | `/docs/{filename}` | X-API-Key | Xóa file đã upload |
+| POST | `/docs/rebuild` | X-API-Key | Trigger rebuild manual (background) |
+| GET | `/docs/rebuild/status` | Không | Trạng thái rebuild gần nhất |
 
-**Building schema** (MongoDB document):
-```json
-{
-  "key": "A4",
-  "ten": "Tòa nhà A4",
-  "mo_ta": "Mô tả chi tiết...",
-  "khoa": "Khoa Điện-Điện tử",
-  "tang": 8,
-  "dich_vu": ["Phòng học", "Phòng thí nghiệm"]
-}
-```
+`crawl-url` body: `{"url": "https://...", "rebuild": true}`. Dùng `requests + BeautifulSoup + html2text` (sync, ~1-2s/URL). KHÔNG render JS → cho SPA, dùng `scripts/crawl.py` (Playwright) local rồi upload kết quả.
 
 ## Security
 
@@ -175,18 +256,39 @@ async def handler(params: FunctionCallParams):
 // ChatbotService.cs
 _httpClient.DefaultRequestHeaders.Add("X-API-Key", configuration["ChatbotApi:ApiKey"]);
 
-// Response handling
+// Để Unity render text → set ?format=tmp (TMP rich text)
+// Để web render markdown → ?format=md (default)
+// Để client text-only → ?format=plain
+var response = await _httpClient.PostAsJsonAsync(
+    $"{baseUrl}/chat?format=tmp",
+    new { message = userMsg, history = previousMessages }
+);
+
 var result = await response.Content.ReadFromJsonAsync<JsonElement>();
 if (result.GetProperty("type").GetString() == "navigation")
     var dest = result.GetProperty("content").GetProperty("destination_building").GetString();
 else
-    var text = result.GetProperty("content").GetString();
+    var text = result.GetProperty("content").GetString();  // text với TMP tags
 ```
+
+### Response format options
+
+| `?format=` | Output | Use case |
+|---|---|---|
+| `md` (default) | `**bold** *italic* [link](url) - bullet` | Frontend web (marked.js render) |
+| `tmp` | `<b>bold</b> <i>italic</i> <link="url"><color=#2563eb><u>...</u></color></link> • bullet` | Unity TextMeshPro |
+| `plain` | `bold italic link bullet` | Client text-only |
+
+Navigation response (`type=navigation`) KHÔNG bị convert — `content` vẫn là dict `{event, destination_building}`.
+
+Converter ở [formatter.py](formatter.py) — regex-based, handle 80% common markdown. Edge case phức tạp (nested formatting, tables) có thể không hoàn hảo.
 
 ## Extending
 
-- **Thêm tòa nhà**: dùng dashboard tab Buildings hoặc `POST /buildings` API trực tiếp
+- **Thêm tòa nhà**: tạo `docs/buildings/{key}.md` với frontmatter → chạy lại `scripts/build_index.py`
+- **Thêm knowledge mới**: paste markdown vào `docs/` (hoặc subfolder) → re-index
 - **Thêm tool mới**: thêm `FunctionSchema` vào `tools_schema`, `register_function` trong `run_chatbot()`
+  - Bump `timeout_secs` nếu tool gọi external service chậm (mặc định Pipecat = 10s)
 - **Đổi model**: sửa `OLLAMA_MODEL` trong `.env`
 - **Deploy**: `render.yaml` đã cấu hình sẵn — push lên Render, set env vars trong dashboard, deploy
 - **Thêm frontend route**: thêm endpoint vào proxy list trong `frontend/vite.config.js`
@@ -194,5 +296,8 @@ else
 ## Important Notes
 
 - **LUÔN chạy uvicorn qua venv** — system uvicorn thiếu packages
-- **KHÔNG commit `.env`** — chứa key thật; chỉ commit `.env.example`
+- **KHÔNG commit `.env`** — chứa key thật. Gitignore đã có sẵn
 - Groq key bị lộ cần revoke ngay tại console.groq.com và tạo key mới
+- HF embedding model load lần đầu ~10s → `api.py` warmup ở startup, `bot.py` set tool timeout = 60s
+- **Request hard timeout**: `run_chatbot()` wrap `asyncio.wait_for(timeout=CHATBOT_TIMEOUT_SECS)` (default 30s, env override). Hết giờ → cancel pipeline + return text "Mình chưa phản hồi kịp trong N giây".
+- **Internet search backend** (search_info fallback): auto-pick `TAVILY_API_KEY` nếu set (~500ms, sạch hơn) else DuckDuckGo qua `ddgs` (~1.5-3s). Tavily free tier 1000 req/tháng tại tavily.com.

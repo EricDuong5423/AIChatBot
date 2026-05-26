@@ -6,8 +6,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/chat': 'http://localhost:8000',
-      '/buildings': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
+      '/docs': 'http://localhost:8000',
     },
   },
   build: {

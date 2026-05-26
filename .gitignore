@@ -1,8 +1,53 @@
+# ── Secrets ──────────────────────────────────────────────────────────────
 .env
+.env.local
+*.pem
+*.key
+
+# ── Python ───────────────────────────────────────────────────────────────
 .venv/
+venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
 
-# Frontend build artifacts
+# ── RAG runtime data (regenerable từ docs/) ──────────────────────────────
+# chroma_db re-build từ docs/ qua scripts/build_index.py hoặc startup auto.
+# KHÔNG commit (file binary lớn, không cần version control).
+chroma_db/
+
+# Nếu muốn giữ uploads qua redeploy Render free tier, BỎ ignore docs/uploaded/
+# (xóa dòng dưới rồi commit files). Mặc định ignore vì là user data ephemeral.
+docs/uploaded/
+
+# HuggingFace + Playwright cache (nằm trong ~/.cache, nhưng phòng case ENV xếp đâu đó)
+.cache/
+
+# ── Frontend ─────────────────────────────────────────────────────────────
 frontend/node_modules/
+frontend/.vite/
 dist/
+
+# ── OS noise ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Logs / temp ──────────────────────────────────────────────────────────
+*.log
+*.tmp
+/tmp/
+
+# ── Build artifacts ──────────────────────────────────────────────────────
+build/
+*.tar.gz

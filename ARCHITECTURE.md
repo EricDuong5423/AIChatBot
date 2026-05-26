@@ -1,632 +1,506 @@
-# Kiến trúc & Cơ chế hoạt động — HCMUT Chatbot
+# HCMUT Chatbot — Kiến trúc & Luồng hoạt động
 
-## Mục lục
-1. [Sơ đồ tổng quan](#1-sơ-đồ-tổng-quan)
-2. [Sơ đồ luồng xử lý đầy đủ (Sequence Diagram)](#2-sơ-đồ-luồng-xử-lý-đầy-đủ-sequence-diagram)
-3. [Sơ đồ quyết định của LLM (Flowchart)](#3-sơ-đồ-quyết-định-của-llm-flowchart)
-4. [Sơ đồ Pipecat Pipeline](#4-sơ-đồ-pipecat-pipeline)
-5. [Kiến trúc hệ thống (chi tiết text)](#5-kiến-trúc-hệ-thống-chi-tiết-text)
-6. [Luồng xử lý từ A đến Z](#6-luồng-xử-lý-từ-a-đến-z)
-7. [LLM Function Calling là gì?](#7-llm-function-calling-là-gì)
-8. [Hai tool cụ thể](#8-hai-tool-cụ-thể)
-9. [OutputCollector — logic kết thúc pipeline](#9-outputcollector--logic-kết-thúc-pipeline)
-10. [Token Optimization](#10-token-optimization)
-11. [Tóm tắt nhanh cho phản biện](#11-tóm-tắt-nhanh-cho-phản-biện)
+Tài liệu này giải thích chi tiết cách chatbot HCMUT hoạt động: kiến trúc tổng thể, các thành phần cốt lõi, luồng xử lý 1 câu hỏi, và các quyết định thiết kế.
+
+> **Mục tiêu chatbot**: trợ lý ảo HCMUT có thể (1) trả lời câu hỏi về trường, (2) chỉ đường tới tòa nhà, (3) tìm trên internet khi không có thông tin nội bộ. Output có thể được hiển thị trên web (markdown), Unity (TMP rich text), hoặc plain text.
 
 ---
 
-## 1. Sơ đồ tổng quan
+## 1. Tổng quan tính năng
+
+| Tính năng | Mô tả |
+|---|---|
+| **Chat hỏi đáp** | Trả lời câu hỏi về HCMUT (chương trình đào tạo, tòa nhà, học phí…) dựa trên knowledge base |
+| **Trigger Navigation** | Khi user yêu cầu dẫn đường, trả về `{event, destination_building}` để frontend hoặc Unity điều hướng |
+| **Internet Fallback** | Tự động search DuckDuckGo/Tavily khi knowledge base không có thông tin |
+| **Knowledge Base Management** | Upload `.md` / `.txt` / `.pdf` qua web UI hoặc crawl từ URL |
+| **Multi-format Output** | Markdown (web), TMP rich text (Unity), plain text |
+| **Hard Timeout** | Tự cancel + fallback text nếu request quá 30s |
+
+---
+
+## 2. Tech Stack
+
+| Layer | Công nghệ | Vai trò |
+|---|---|---|
+| **LLM** | DeepSeek (`deepseek-chat`) qua OpenAI-compatible API | Reasoning + tool calling + text generation |
+| **Pipeline orchestration** | Pipecat | Quản lý dialog flow, tool calling, streaming |
+| **Vector DB** | Chroma (persistent SQLite + HNSW index) | Lưu vector embeddings, similarity search |
+| **Embedding model** | `bkai-foundation-models/vietnamese-bi-encoder` (768D) | Vector hóa tiếng Việt, chạy local CPU |
+| **Sparse retriever** | BM25Okapi (`rank_bm25`) | Keyword matching, bù điểm yếu của semantic |
+| **Internet search** | DuckDuckGo qua `ddgs` (default) hoặc Tavily | Fallback khi RAG không có data |
+| **Backend** | FastAPI + Uvicorn | HTTP server, REST API |
+| **Frontend** | Vue 3 + Vite + TailwindCSS + marked.js | Dashboard chat + knowledge base management |
+| **Crawler** | Playwright headless Chromium ([scripts/crawl.py](scripts/crawl.py)) | Crawl SPA site khi cần (chạy LOCAL, không deploy) |
+| **PDF extraction** | `pypdf` | Convert PDF → text khi upload |
+| **Deploy** | Render | Single web service, free tier |
+
+---
+
+## 3. Kiến trúc tổng thể
 
 ```mermaid
 graph TB
-    subgraph Client
-        FE["🖥️ Vue 3 Frontend<br/>(Dashboard)"]
-        CS["📱 C# ASP.NET<br/>(CO4029_BE)"]
+    subgraph Client["Client Layer"]
+        WEB[Web Dashboard<br/>Vue + marked.js]
+        UNITY[Unity App<br/>TextMeshPro]
+        CSHARP[C# Backend<br/>CO4029_BE]
     end
 
-    subgraph Server["Render Cloud Server"]
-        API["⚡ FastAPI<br/>api.py"]
-        BOT["🤖 Pipecat Pipeline<br/>bot.py"]
-        STATIC["📁 Static Files<br/>dist/"]
+    subgraph API["FastAPI Server (api.py)"]
+        CHAT["/chat<br/>?format=md|tmp|plain"]
+        DOCS["/docs/*<br/>upload, crawl, list, rebuild"]
+        HEALTH["/health"]
     end
 
-    subgraph External
-        LLM["🧠 Groq / Ollama<br/>(LLM API)"]
-        DB[("🗄️ MongoDB<br/>Buildings")]
+    subgraph Core["Core Logic"]
+        BOT[bot.py<br/>Pipecat pipeline<br/>+ system prompt<br/>+ tool routing]
+        FMT[formatter.py<br/>markdown → tmp/plain]
+        RAG[rag.py<br/>hybrid retrieval]
     end
 
-    FE -- "POST /chat<br/>GET/POST/PUT/DELETE /buildings" --> API
-    CS -- "POST /chat<br/>X-API-Key header" --> API
-    FE -- "GET /" --> STATIC
+    subgraph External["External Services"]
+        DEEPSEEK[DeepSeek API<br/>deepseek-chat]
+        DDG[DuckDuckGo<br/>via ddgs]
+    end
 
-    API -- "run_chatbot()" --> BOT
-    BOT -- "OpenAI-compatible API" --> LLM
-    BOT -- "Motor async driver" --> DB
-    LLM -- "tool_calls / text" --> BOT
-    DB -- "building data" --> BOT
+    subgraph Storage["Storage"]
+        DOCSDIR[docs/<br/>uploaded/<br/>crawled .md/.txt files]
+        CHROMA[(chroma_db/<br/>vectors + metadata)]
+    end
 
-    API -- "serves" --> STATIC
+    WEB --> CHAT
+    UNITY --> CSHARP
+    CSHARP --> CHAT
+    WEB --> DOCS
+
+    CHAT --> BOT
+    CHAT --> FMT
+    DOCS --> RAG
+    BOT --> RAG
+    BOT --> DEEPSEEK
+    BOT --> DDG
+
+    RAG --> DOCSDIR
+    RAG --> CHROMA
+
+    style BOT fill:#fef3c7
+    style RAG fill:#dbeafe
+    style DEEPSEEK fill:#fce7f3
 ```
 
 ---
 
-## 2. Sơ đồ luồng xử lý đầy đủ (Sequence Diagram)
+## 4. Luồng xử lý 1 câu hỏi (Request Flow)
+
+### 4.1 Sequence diagram
 
 ```mermaid
 sequenceDiagram
-    actor U as 👤 User
-    participant FE as Vue Frontend
-    participant API as FastAPI
-    participant BOT as bot.py
-    participant LLM as Groq LLM
-    participant DB as MongoDB
+    autonumber
+    participant U as User<br/>(Web/Unity)
+    participant API as FastAPI<br/>/chat
+    participant BOT as bot.py<br/>(Pipecat)
+    participant LLM as DeepSeek API
+    participant TOOL as Tool Handler<br/>(search_info / navigation)
+    participant RAG as rag.py
+    participant DDG as DuckDuckGo
 
-    U->>FE: Nhập tin nhắn
-    FE->>API: POST /chat<br/>{message, history}<br/>X-API-Key: ***
-
-    API->>API: verify_api_key()
-
+    U->>API: POST /chat {message, history, ?format=md/tmp/plain}
     API->>BOT: run_chatbot(message, history)
 
-    BOT->>DB: db_get_all_buildings()<br/>[chỉ lấy key + tên]
-    DB-->>BOT: [{key:"A4", ten:"Tòa A4"}, ...]
+    Note over BOT: Build system prompt<br/>(catalog tòa nhà từ docs/buildings/)
 
-    BOT->>BOT: Build system prompt<br/>(mục lục tòa nhà + quy tắc tool)
-    BOT->>BOT: Tạo LLMContext<br/>(system + history + message)
+    BOT->>LLM: chat.completions (msg + tools schema)
+    LLM-->>BOT: tool_call: search_info("query") hoặc trigger_navigation("...")
 
-    BOT->>LLM: messages[] + tools[]<br/>(get_building_info, trigger_navigation)
+    alt User hỏi info (search_info)
+        BOT->>TOOL: handle_search_info(query)
+        TOOL->>RAG: query_vectorstore(query, k=8)
+        Note over RAG: Hybrid: BM25 + Semantic + RRF
+        RAG-->>TOOL: top-8 chunks
+        TOOL->>TOOL: _is_rag_useful(query, hits)?<br/>(≥50% keywords match)
 
-    alt 📖 Hỏi thông tin tòa nhà
-        LLM-->>BOT: tool_call:<br/>get_building_info("thu-vien")
-        BOT->>DB: db_get_building("thu-vien")
-        DB-->>BOT: {ten, mo_ta, tang, dich_vu, ...}
-        BOT->>LLM: tool_result: {full data JSON}
-        LLM-->>BOT: text: "Thư viện có 200,000 đầu sách..."
-        BOT-->>API: {type:"text", content:"..."}
+        alt RAG useful
+            TOOL-->>BOT: source="rag", hits
+        else RAG miss
+            TOOL->>DDG: ddgs.text(query, max=2)
+            DDG-->>TOOL: top-2 snippets
+            TOOL-->>BOT: source="internet", hits
+        end
 
-    else 🧭 Yêu cầu chỉ đường
-        LLM-->>BOT: tool_call:<br/>trigger_navigation("Thư viện Trung tâm")
-        BOT->>BOT: Lưu NavigationResult<br/>Gửi EndFrame (run_llm=False)
-        BOT-->>API: {type:"navigation",<br/>content:{destination_building:"..."}}
+        BOT->>LLM: synthesize answer with tool result
+        LLM-->>BOT: text response (markdown)
 
-    else 💬 Câu hỏi chung
-        LLM-->>BOT: text: "Xin chào! Tôi có thể..."
-        BOT-->>API: {type:"text", content:"..."}
+    else User yêu cầu chỉ đường (trigger_navigation)
+        BOT->>TOOL: handle_trigger_navigation(destination)
+        TOOL->>TOOL: _looks_like_building(dest)?<br/>(reject "Khoa X", "phòng F1.05"...)
+        alt destination valid
+            TOOL-->>BOT: NavigationResult event<br/>(EndFrame)
+        else invalid
+            TOOL-->>LLM: error → LLM retry với text fallback
+        end
     end
 
-    API-->>FE: HTTP 200 + JSON
-    FE-->>U: Hiển thị kết quả
+    BOT-->>API: result {type, content}
+    API->>API: convert_format(content, fmt)<br/>md / tmp / plain
+    API-->>U: JSON {type, content}
 ```
 
----
+### 4.2 Diễn giải từng bước
 
-## 3. Sơ đồ quyết định của LLM (Flowchart)
+1. **Client gửi POST /chat** với body `{message, history}` và query param `?format=md|tmp|plain`
+2. **FastAPI** gọi `run_chatbot()` trong `bot.py`
+3. **bot.py** build system prompt động:
+   - Đọc `docs/buildings/*.md` lấy catalog (tên tòa + khoa) đưa vào prompt
+   - System prompt mô tả 3 luồng + danh sách tools available
+4. **Pipecat pipeline** chạy: user_aggregator → LLM → assistant_aggregator → output_collector
+5. **DeepSeek** nhận message + tool schemas → quyết định gọi tool nào:
+   - `trigger_navigation(destination_building)` — nếu user yêu cầu dẫn đường
+   - `search_info(query)` — cho mọi câu hỏi thông tin
+6. **Tool handler** thực thi tool, trả kết quả về LLM context
+7. **DeepSeek round 2** đọc tool result, tổng hợp câu trả lời text
+8. **OutputCollector** nhận text response, queue `EndFrame` để kết thúc pipeline
+9. **api.py** áp dụng `format` conversion lên `content`:
+   - `md`: giữ nguyên markdown
+   - `tmp`: convert `**bold**` → `<b>bold</b>`, etc. cho Unity
+   - `plain`: strip mọi markdown
+10. **Response** JSON `{type: "text"|"navigation", content: ...}`
 
-```mermaid
-flowchart TD
-    START([🟢 Nhận user message]) --> PROMPT
-
-    PROMPT["Build system prompt\n+ mục lục tòa nhà từ DB"] --> CTX
-    CTX["Tạo context:\nsystem + history + message"] --> LLM_CALL
-
-    LLM_CALL["📡 Gửi lên Groq/Ollama\n(messages + tools)"] --> DECIDE
-
-    DECIDE{{"🧠 LLM quyết định"}}
-
-    DECIDE -- "Từ khóa chỉ đường\n(đi đến, chỉ đường...)" --> NAV_TOOL
-    DECIDE -- "Hỏi chi tiết\ntòa nhà cụ thể" --> INFO_TOOL
-    DECIDE -- "Câu hỏi chung\nkhông cần data" --> TEXT_RESP
-
-    NAV_TOOL["🔧 tool_call:\ntrigger_navigation(destination)"]
-    NAV_TOOL --> NAV_HANDLER["handle_trigger_navigation()\n→ lưu NavigationResult\n→ result_callback(run_llm=False)\n→ EndFrame"]
-    NAV_HANDLER --> NAV_OUT
-
-    INFO_TOOL["🔧 tool_call:\nget_building_info(key)"]
-    INFO_TOOL --> DB_FETCH["🗄️ db_get_building(key)\n→ full data từ MongoDB"]
-    DB_FETCH --> TOOL_RESULT["Đưa data vào context\ndưới dạng tool_result"]
-    TOOL_RESULT --> LLM_AGAIN["📡 LLM chạy lần 2\nvới data mới"]
-    LLM_AGAIN --> TEXT_RESP
-
-    TEXT_RESP["💬 LLM sinh text response"] --> COLLECTOR
-    COLLECTOR["OutputCollector nhận\nLLMContextAssistantTimestampFrame"]
-
-    COLLECTOR --> CHECK{{"message cuối\ncos tool_calls?"}}
-    CHECK -- "Có (tool call)\nchưa xong" --> WAIT["⏳ Chờ tool result\nvà LLM chạy lại"]
-    WAIT --> LLM_AGAIN
-    CHECK -- "Không (text)\nđã xong" --> END_FRAME["Gửi EndFrame\n→ Pipeline dừng"]
-
-    NAV_OUT["{type: navigation\ncontent: {destination_building}}"]
-    END_FRAME --> TEXT_OUT["{type: text\ncontent: câu trả lời}"]
-
-    NAV_OUT --> RETURN([🔴 Trả về API])
-    TEXT_OUT --> RETURN
-```
-
----
-
-## 4. Sơ đồ Pipecat Pipeline
+### 4.3 Timeout & error handling
 
 ```mermaid
 flowchart LR
-    INPUT(["📨 LLMContextFrame\n(context với message mới)"]) --> UA
+    START[Receive /chat] --> TIMER[Start 30s timer<br/>asyncio.wait_for]
+    TIMER --> PIPELINE[Pipecat pipeline]
+    PIPELINE -->|< 30s| RESULT[Return result]
+    PIPELINE -->|≥ 30s| CANCEL[Cancel task]
+    CANCEL --> FALLBACK["Return text:<br/>Mình chưa phản hồi kịp trong 30s..."]
+```
 
-    subgraph PIPELINE["Pipecat Pipeline"]
-        UA["user_agg\nLLMContextAggregatorPair.user()\n─────────────\nNhận context frame\nChuẩn bị input cho LLM"]
+---
 
-        LLM_SVC["llm\nOpenAILLMService\n─────────────\nGọi Groq/Ollama API\nXử lý tool_calls tự động\nStreaming text chunks"]
+## 5. 3 Luồng quyết định (Decision Flow)
 
-        AA["assistant_agg\nLLMContextAggregatorPair.assistant()\n─────────────\nGom streaming chunks\nCập nhật context\nvới response mới"]
+LLM quyết định gọi tool nào dựa trên user message:
 
-        COL["collector\nOutputCollector\n─────────────\nPhát hiện tool_call vs text\nQuyết định gửi EndFrame\nLưu kết quả cuối"]
+```mermaid
+flowchart TD
+    Q[User Message] --> CLASSIFY{User message<br/>có pattern yêu cầu<br/>dẫn đường?<br/>("chỉ đường", "đi đến",<br/>"dẫn tôi"...)}
 
-        UA --> LLM_SVC --> AA --> COL
+    CLASSIFY -->|Có| NAV_RESOLVE{Destination<br/>là TÊN TÒA<br/>hay khoa/phòng?}
+    NAV_RESOLVE -->|Tòa| NAV[trigger_navigation<br/>destination_building=Tòa X]
+    NAV_RESOLVE -->|Khoa/Phòng| NAV_LOOKUP{Có trong<br/>DANH BẠ<br/>system prompt?}
+    NAV_LOOKUP -->|Có| NAV
+    NAV_LOOKUP -->|Không| NAV_SEARCH[search_info<br/>tìm khoa→tòa]
+    NAV_SEARCH --> NAV_OK{Tìm được<br/>tòa cụ thể?}
+    NAV_OK -->|Có| NAV
+    NAV_OK -->|Không| TEXT_NOT_FOUND["Text:<br/>Mình không biết khoa này<br/>ở tòa nào"]
+
+    CLASSIFY -->|Không| INFO[search_info<br/>query=truy vấn]
+    INFO --> RAG_CHECK{RAG hits<br/>useful?<br/>≥50% keyword match}
+    RAG_CHECK -->|Có| TEXT_RAG["Text trả lời<br/>từ RAG context"]
+    RAG_CHECK -->|Không| INTERNET[DDG search<br/>top-2 snippet]
+    INTERNET --> NET_OK{Có hits?}
+    NET_OK -->|Có| TEXT_NET["Text trả lời<br/>từ internet, cite URL"]
+    NET_OK -->|Không| TEXT_NO_INFO["Text:<br/>Chưa tìm được thông tin"]
+
+    NAV --> GUARD{Destination<br/>looks like<br/>building?}
+    GUARD -->|Có| NAV_OUTPUT["Output {type:navigation,<br/>destination_building}"]
+    GUARD -->|Không<br/>(có 'khoa', 'phòng', dot)| NAV_REJECT[Reject + tell LLM<br/>fallback text]
+    NAV_REJECT --> TEXT_NOT_FOUND
+
+    style NAV fill:#fef3c7
+    style INFO fill:#dbeafe
+    style TEXT_NO_INFO fill:#fee2e2
+    style TEXT_NOT_FOUND fill:#fee2e2
+```
+
+### Tại sao chia 3 luồng?
+
+- **Luồng 1 (Navigation)**: kích hoạt event điều hướng — output structured data, không phải text
+- **Luồng 2 (Info, RAG → Internet)**: trả lời text. **Code orchestrate fallback** (không phải LLM tự quyết) → đảm bảo nhất quán, LLM không "lười" stop ở RAG khi RAG không có data
+- **Luồng 3 (Not found)**: chỉ kích hoạt khi cả RAG lẫn Internet đều fail → tránh bịa thông tin
+
+---
+
+## 6. RAG Pipeline (Indexing)
+
+### 6.1 Build vector store (offline, chạy 1 lần)
+
+```mermaid
+flowchart LR
+    A[docs/**/*.md<br/>docs/**/*.txt] --> B[_load_docs<br/>parse frontmatter<br/>mark is_uploaded]
+    B --> C[Document objects<br/>page_content + metadata]
+    C --> D[RecursiveCharacterTextSplitter<br/>chunk=500, overlap=50]
+    D --> E[Chunks ~150 đoạn]
+    E --> F[HuggingFaceEmbeddings<br/>bkai vietnamese-bi-encoder<br/>local CPU]
+    F --> G[Vector 768D mỗi chunk]
+    G --> H[(Chroma persistent<br/>chroma_db/)]
+
+    style F fill:#fce7f3
+    style H fill:#dbeafe
+```
+
+**Chi tiết các bước**:
+
+1. **Load** ([rag.py:_load_docs](rag.py)):
+   - Scan đệ quy `docs/`, lấy mọi `.md` và `.txt`
+   - Parse YAML frontmatter (chỉ `.md`)
+   - Mark `is_uploaded=true` cho file trong `docs/uploaded/` (để boost sau)
+
+2. **Chunk** ([rag.py:build_vectorstore](rag.py)):
+   - `RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50, separators=["\n\n", "\n", ". ", " ", ""])`
+   - Cố split tại boundary tự nhiên (paragraph > newline > câu > từ)
+   - Overlap 50 chars để câu trả lời vắt qua biên không bị cắt
+
+3. **Embed**:
+   - Model: `bkai-foundation-models/vietnamese-bi-encoder` — bi-encoder do BK AI Lab (HCMUT) train, specialized tiếng Việt
+   - Local CPU, không cần API key
+   - Mỗi chunk → 768-dim float vector
+
+4. **Store**:
+   - Chroma persistent → SQLite + HNSW (Hierarchical Navigable Small World) index
+   - `chroma_db/chroma.sqlite3` + binary files
+   - Survive restart, không cần rebuild
+
+### 6.2 Hybrid Retrieval (query time)
+
+```mermaid
+flowchart TB
+    Q[Query: 'Khoa Cơ khí ở tòa nào'] --> SEM[Semantic Search<br/>Chroma similarity<br/>top-2k chunks]
+    Q --> KEY[BM25 keyword<br/>top-2k chunks]
+
+    SEM --> RRF[Reciprocal Rank Fusion<br/>score = Σ weight/(60+rank)]
+    KEY --> RRF
+
+    RRF --> WEIGHTS{Apply<br/>weights}
+    WEIGHTS -->|is_uploaded=true| BOOST[× 2.5]
+    WEIGHTS -->|>40% là links/URLs| PENALTY[× 0.4]
+    WEIGHTS -->|else| NORMAL[× 1.0]
+
+    BOOST --> MERGE[Merge + dedup<br/>by content prefix]
+    PENALTY --> MERGE
+    NORMAL --> MERGE
+
+    MERGE --> RERANK[_rerank_for_location<br/>nếu query hỏi 'ở tòa nào'<br/>→ boost chunks 'Tòa X là của Y']
+    RERANK --> TOPK[Top-K final chunks]
+    TOPK --> LLM[→ LLM context]
+```
+
+**Vì sao cần Hybrid?**
+
+- **Semantic only** (chỉ embeddings): yếu cho keyword match tiếng Việt ngắn (vd "Khoa Cơ khí"). Match nhầm với "Xưởng cơ khí C1" trong noise text.
+- **BM25 only**: không hiểu ngữ nghĩa, fail với câu phrasing khác từ doc.
+- **Kết hợp 2 + RRF**: ổn định với cả 2 case — đây là approach của LangChain `EnsembleRetriever`, NVIDIA, Anthropic, etc.
+
+**Boost & Penalty (cải tiến riêng cho project này)**:
+- **×2.5 cho uploaded**: file user upload có content curated, signal mạnh hơn crawled
+- **×0.4 cho link-heavy chunks**: `hcmut.edu.vn` SPA crawl ra nhiều chunks chỉ là `[link](drive.google.com/...)`. Penalty này giảm noise
+
+**Re-rank** ([bot.py:_rerank_for_location](bot.py)):
+- Khi query có pattern "ở tòa nào", boost chunks chứa pattern `Tòa X là của Y`
+- Fix bug LLM nhầm "Xưởng cơ khí C1" với "Khoa Cơ khí ở C1"
+
+---
+
+## 7. Document Upload Pipeline
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant FE as Frontend<br/>(DocsPanel.vue)
+    participant API as /docs/upload
+    participant FS as Filesystem<br/>(docs/uploaded/)
+    participant BG as Background Task
+    participant RAG as build_vectorstore
+
+    U->>FE: Drop file (.md/.txt/.pdf) hoặc paste URL
+    FE->>API: POST multipart hoặc {url}
+
+    alt PDF
+        API->>API: pypdf extract text
+        API->>FS: Save as .txt
+    else TXT
+        API->>FS: Save .txt nguyên content
+    else MD
+        API->>FS: Save .md + frontmatter
+    else URL crawl
+        API->>API: requests + BS4 + html2text
+        API->>FS: Save .md (output html2text là MD)
     end
 
-    COL -- "EndFrame" --> STOP(["🛑 Pipeline dừng"])
-    COL -- "result" --> OUT(["📤 {type, content}"])
+    API->>BG: schedule _rebuild_index_safe()
+    API-->>FE: 200 OK {filename, rebuild_scheduled: true}
 
-    subgraph HANDLERS["Tool Handlers (đăng ký vào llm)"]
-        H1["handle_trigger_navigation()\n→ lưu NavigationResult\n→ EndFrame"]
-        H2["handle_get_building_info()\n→ fetch MongoDB\n→ trả JSON cho LLM"]
+    BG->>RAG: build_vectorstore()
+    Note over RAG: Load all docs<br/>chunk + embed + index
+    RAG-->>BG: n chunks indexed
+    BG->>BG: update _rebuild_state.last_at
+
+    loop poll every 3s
+        FE->>API: GET /docs/rebuild/status
+        API-->>FE: {running, last_at, last_chunks}
     end
-
-    LLM_SVC -. "tool_call: trigger_navigation" .-> H1
-    LLM_SVC -. "tool_call: get_building_info" .-> H2
-    H1 -. "result_callback\n(run_llm=False)" .-> LLM_SVC
-    H2 -. "result_callback\n(run_llm=True)" .-> LLM_SVC
-```
-8. [Tóm tắt nhanh cho phản biện](#8-tóm-tắt-nhanh-cho-phản-biện)
-
----
-
-## 5. Kiến trúc hệ thống (chi tiết text)
-
-```
-┌─────────────────┐        ┌──────────────────────────────┐
-│  Vue 3 Frontend │──────▶│  FastAPI  (api.py)            │
-│  (Dashboard)    │◀──────│  POST /chat                   │
-└─────────────────┘        │  GET/POST/PUT/DELETE /buildings│
-                           └──────────────┬───────────────┘
-                                          │
-                           ┌──────────────▼───────────────┐
-                           │  Pipecat Pipeline  (bot.py)  │
-                           │                              │
-                           │  user_agg → llm → asst_agg  │
-                           │               → collector    │
-                           └──────────────┬───────────────┘
-                                          │
-                      ┌───────────────────┼───────────────┐
-                      │                   │               │
-            ┌─────────▼──────┐  ┌─────────▼──────┐  ┌────▼──────┐
-            │  Groq / Ollama │  │    MongoDB     │  │ Frontend  │
-            │  (LLM API)     │  │  (Buildings DB)│  │  (dist/)  │
-            └────────────────┘  └────────────────┘  └───────────┘
-```
-
-**Thành phần chính:**
-
-| Thành phần | Vai trò |
-|---|---|
-| `api.py` | Nhận HTTP request, gọi pipeline, trả kết quả |
-| `bot.py` | Pipecat pipeline — điều phối toàn bộ luồng xử lý |
-| `database.py` | Async CRUD với MongoDB qua Motor |
-| `auth.py` | Xác thực API key qua header `X-API-Key` |
-| Groq/Ollama | LLM thực sự sinh ra câu trả lời |
-
----
-
-## 6. Luồng xử lý từ A đến Z
-
-### Bước 1 — Client gửi request
-
-```
-POST /chat
-Header: X-API-Key: <key>
-Body: {
-  "message": "Thư viện có bao nhiêu đầu sách?",
-  "history": [
-    {"role": "user",      "content": "Xin chào"},
-    {"role": "assistant", "content": "Xin chào! Tôi có thể giúp gì cho bạn?"}
-  ]
-}
-```
-
-`history` là toàn bộ lịch sử hội thoại **trước** tin nhắn hiện tại, giúp LLM hiểu ngữ cảnh.
-
----
-
-### Bước 2 — api.py xác thực và điều phối
-
-```python
-# auth.py kiểm tra header X-API-Key
-# Nếu CHATBOT_API_KEY trống → bỏ qua (dev mode)
-# Nếu key sai → HTTP 403
-
-result = await run_chatbot(request.message, history)
-return result  # {"type": "text"/"navigation", "content": ...}
 ```
 
 ---
 
-### Bước 3 — bot.py khởi tạo pipeline
+## 8. Multi-format Output (Web vs Unity)
 
+Cùng 1 markdown response, 3 format output khác nhau:
+
+```mermaid
+flowchart LR
+    LLM[DeepSeek text<br/>markdown] --> CONVERT{format param}
+
+    CONVERT -->|md default| MD["**bold**<br/>- bullet<br/>[link](url)"]
+    CONVERT -->|tmp| TMP["&lt;b&gt;bold&lt;/b&gt;<br/>• bullet<br/>&lt;link='url'&gt;&lt;color&gt;..."]
+    CONVERT -->|plain| PLAIN["bold<br/>• bullet<br/>link"]
+
+    MD --> WEB[Web Dashboard<br/>marked.js + DOMPurify]
+    TMP --> UNITY[Unity TextMeshPro<br/>tmpText.text = response]
+    PLAIN --> OTHER[Plain text client]
+
+    style TMP fill:#fef3c7
+    style MD fill:#dbeafe
 ```
-run_chatbot(user_message, conversation_history)
-    │
-    ├── 1. Kết nối LLM service (Groq hoặc Ollama, cùng OpenAI-compatible API)
-    │
-    ├── 2. Build system prompt:
-    │       - Fetch TẤT CẢ buildings từ MongoDB (chỉ lấy key + tên)
-    │       - Tạo "mục lục" dạng:
-    │           - key=`A4` → Tòa nhà A4
-    │           - key=`thu-vien` → Thư viện Trung tâm
-    │           - ...
-    │       → Nhét mục lục này vào system prompt
-    │
-    ├── 3. Tạo LLMContext:
-    │       messages = [system_prompt] + conversation_history
-    │       tools = [get_building_info, trigger_navigation]
-    │
-    ├── 4. Xây dựng pipeline:
-    │       user_agg → llm → assistant_agg → collector
-    │
-    ├── 5. Đăng ký tool handlers
-    │
-    └── 6. Đẩy tin nhắn vào pipeline → chạy → trả kết quả
-```
+
+**Conversion regex** ([formatter.py](formatter.py)):
+- `**bold**` → `<b>bold</b>`
+- `*italic*` → `<i>italic</i>`
+- `# H1` → `<size=140%><b>H1</b></size>`
+- `[text](url)` → `<link="url"><color=#2563eb><u>text</u></color></link>` (clickable trong Unity)
+- `- bullet` → `• bullet`
+- `> quote` → `<color=#666666>│ quote</color>`
 
 ---
 
-### Bước 4 — LLM xử lý
+## 9. Tổng kết Components & Files
 
-LLM nhận được:
-- **System prompt**: vai trò + mục lục tòa nhà + quy tắc dùng tool
-- **History**: các lượt hội thoại trước
-- **Tin nhắn mới**: "Thư viện có bao nhiêu đầu sách?"
-- **Danh sách tool**: mô tả `get_building_info` và `trigger_navigation`
-
-LLM **quyết định** một trong ba hướng:
-
-```
-┌────────────────────────────────────────────────────────┐
-│ LLM nhận input + tools                                 │
-│                                                        │
-│  Câu hỏi thông tin  →  gọi get_building_info(key)     │
-│  Yêu cầu chỉ đường  →  gọi trigger_navigation(dest)   │
-│  Câu hỏi chung      →  trả lời text trực tiếp         │
-└────────────────────────────────────────────────────────┘
-```
-
----
-
-### Bước 5a — Nếu LLM gọi `get_building_info`
-
-```
-LLM output: tool_call { name: "get_building_info", arguments: {"key": "thu-vien"} }
-    │
-    ▼
-Pipecat phát hiện tool_call → gọi handle_get_building_info()
-    │
-    ▼
-db_get_building("thu-vien") → MongoDB trả về:
-    {
-      "key": "thu-vien",
-      "ten": "Thư viện Trung tâm",
-      "mo_ta": "Có hơn 200,000 đầu sách...",
-      "tang": 4,
-      "dich_vu": ["Mượn/trả sách", "Phòng đọc", ...]
-    }
-    │
-    ▼
-result_callback(json_data, run_llm=True)
-    │
-    ▼
-Dữ liệu được đưa vào context dưới dạng tool_result message
-    │
-    ▼
-LLM chạy lại lần 2 với data mới:
-    → "Thư viện Trung tâm ĐHBK TP.HCM có hơn 200,000 đầu sách..."
-    │
-    ▼
-OutputCollector nhận LLMContextAssistantTimestampFrame
-→ Kiểm tra: message cuối là text (không phải tool_call) → gửi EndFrame
-    │
-    ▼
-collector.result = {"type": "text", "content": "Thư viện có hơn 200,000 đầu sách..."}
-```
-
----
-
-### Bước 5b — Nếu LLM gọi `trigger_navigation`
-
-```
-LLM output: tool_call { name: "trigger_navigation", arguments: {"destination_building": "Thư viện Trung tâm"} }
-    │
-    ▼
-Pipecat gọi handle_trigger_navigation()
-    │
-    ▼
-collector.navigation = NavigationResult(destination="Thư viện Trung tâm")
-    │
-    ▼
-result_callback(result, run_llm=False)  ← False: LLM KHÔNG chạy lại
-    │
-    ▼
-task.queue_frame(EndFrame())  ← kết thúc pipeline ngay
-    │
-    ▼
-collector.result = {
-  "type": "navigation",
-  "content": {
-    "event": "navigation_triggered",
-    "destination_building": "Thư viện Trung tâm"
-  }
-}
-```
-
----
-
-### Bước 6 — Trả kết quả về client
-
-```python
-# api.py trả về HTTP 200 với JSON:
-{"type": "text",       "content": "Thư viện có hơn 200,000 đầu sách..."}
-# hoặc:
-{"type": "navigation", "content": {"event": "navigation_triggered", "destination_building": "..."}}
-```
-
----
-
-## 7. LLM Function Calling là gì?
-
-### Khái niệm cốt lõi
-
-Function Calling (còn gọi là Tool Use) là cơ chế cho phép LLM **không tự bịa dữ liệu** mà thay vào đó **yêu cầu hệ thống cung cấp dữ liệu thật** qua các hàm định nghĩa sẵn.
-
-### Cách nó hoạt động ở tầng API
-
-Khi gửi request lên LLM, ngoài `messages`, ta truyền thêm `tools`:
-
-```json
-{
-  "model": "llama-3.3-70b-versatile",
-  "messages": [...],
-  "tools": [
-    {
-      "type": "function",
-      "function": {
-        "name": "get_building_info",
-        "description": "Tra cứu thông tin chi tiết của một tòa nhà theo key.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "key": {
-              "type": "string",
-              "description": "Key định danh của tòa nhà, ví dụ: 'A4', 'thu-vien'"
-            }
-          },
-          "required": ["key"]
-        }
-      }
-    }
-  ]
-}
-```
-
-LLM trả về **một trong hai dạng response**:
-
-**Dạng 1 — Text bình thường:**
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": "Xin chào! Tôi có thể giúp gì cho bạn?"
-    },
-    "finish_reason": "stop"
-  }]
-}
-```
-
-**Dạng 2 — Tool call:**
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [{
-        "id": "call_abc123",
-        "type": "function",
-        "function": {
-          "name": "get_building_info",
-          "arguments": "{\"key\": \"thu-vien\"}"
-        }
-      }]
-    },
-    "finish_reason": "tool_calls"
-  }]
-}
-```
-
-Khi nhận Dạng 2, **ứng dụng** (không phải LLM) phải:
-1. Parse `arguments`
-2. Thực thi hàm tương ứng (query DB, gọi API, ...)
-3. Đưa kết quả vào context dưới dạng `tool_result` message
-4. Gửi lại toàn bộ context cho LLM để nó tiếp tục sinh câu trả lời
-
-### Tại sao cần Function Calling?
-
-| Vấn đề | Không có Function Calling | Có Function Calling |
+| File | Vai trò | Lines |
 |---|---|---|
-| Dữ liệu tòa nhà | Nhét hết vào prompt → tốn token | Fetch on-demand khi cần |
-| Độ chính xác | LLM có thể hallucinate (bịa) | Dữ liệu từ DB → chính xác |
-| Hành động | LLM chỉ nói "hãy đến thư viện" | LLM trigger event navigation thật |
-| Khả năng mở rộng | Thêm data = thêm token mỗi request | Thêm data = không ảnh hưởng prompt |
+| [api.py](api.py) | FastAPI server, `/chat` endpoint, mount docs router, serve frontend | ~160 |
+| [bot.py](bot.py) | Pipecat pipeline, system prompt, 2 tool handlers, run_chatbot() | ~570 |
+| [rag.py](rag.py) | Hybrid retrieval (BM25 + semantic + RRF), build/query vectorstore | ~250 |
+| [routers/docs.py](routers/docs.py) | Knowledge base CRUD endpoints (upload, crawl URL, rebuild) | ~280 |
+| [formatter.py](formatter.py) | Markdown → TMP rich text / plain converter | ~120 |
+| [auth.py](auth.py) | API key header verification | ~20 |
+| [scripts/crawl.py](scripts/crawl.py) | Playwright crawler cho hcmut.edu.vn SPA | ~160 |
+| [scripts/build_index.py](scripts/build_index.py) | Script CLI gọi `build_vectorstore()` | ~15 |
+| [frontend/](frontend/) | Vue 3 dashboard (Chat + Knowledge Base tabs) | — |
 
 ---
 
-## 8. Pipecat Pipeline (giải thích chi tiết)
+## 10. Quyết định thiết kế quan trọng
 
-### Pipecat là gì?
+| Vấn đề | Giải pháp | Lý do |
+|---|---|---|
+| Bot bịa tên tòa khi không biết | Code guardrail `_looks_like_building()` reject "Khoa X", "phòng F1.05" | Prompt-only không đủ — LLM eager. Code-level enforce |
+| Bot ưu tiên RAG generic chunks | Boost uploaded ×2.5 + Link penalty ×0.4 | User-uploaded curated > crawled noise (Drive links spam) |
+| Embedding multilingual yếu Vietnamese | Switch sang BK AI Lab Vietnamese bi-encoder | Specialized model, MTEB tốt hơn |
+| LLM "lười" không fallback internet | Gộp `search_knowledge` + `search_internet` → 1 `search_info`, code orchestrate fallback | Bypass LLM decision, đảm bảo nhất quán |
+| hcmut.edu.vn là SPA | Dùng Playwright thay vì requests | Body shell rỗng với requests, JS render mới có content |
+| Cold start embed model 10s | `@app.on_event("startup")` warmup + tool timeout 60s | Tránh first request timeout |
+| Hard timeout request | `asyncio.wait_for(30s)` + cancel task + fallback text | Tránh user đợi vô tận khi LLM/network hang |
+| Multi-client (web/Unity) | `?format=md|tmp|plain` query param, code convert ở api layer | Source of truth = markdown từ LLM, client chỉ định format mong muốn |
 
-Pipecat là framework Python xây dựng **luồng xử lý AI theo kiểu pipeline**. Mỗi component trong pipeline là một `FrameProcessor` — nhận `Frame` vào, xử lý, đẩy `Frame` ra.
+---
 
-### Các Frame quan trọng
+## 11. Persistence trên Render
 
-| Frame | Ý nghĩa |
+Câu hỏi quan trọng cho deploy: **vector database được lưu thế nào?**
+
+### Free tier (mặc định)
+- **KHÔNG có persistent disk** — mỗi lần deploy/restart, filesystem reset hoàn toàn
+- Hệ quả:
+  - `chroma_db/` (vector index): **bị xóa** → auto rebuild từ `docs/` khi server startup (~10-30s)
+  - `docs/uploaded/` (user upload): **bị xóa** nếu không commit vào git
+  - `docs/*.md` từ crawl/seed: **giữ** nếu commit vào git
+- Cơ chế tự rebuild ([api.py:_warmup_rag](api.py)):
+  ```python
+  @app.on_event("startup")
+  async def _warmup_rag():
+      if not has_chroma and has_docs:
+          build_vectorstore()   # rebuild từ docs/
+      query_vectorstore("warmup", 1)  # warm embed model
+  ```
+- HF embed model (~540MB) cũng tải lại mỗi cold start → lần deploy đầu **~5 phút**, sau cache layer của Render → nhanh hơn
+
+### Starter plan ($7/month)
+Bật persistent disk trong [render.yaml](render.yaml) (đã có sẵn block comment):
+```yaml
+disk:
+  name: data
+  mountPath: /opt/render/project/src/chroma_db
+  sizeGB: 1
+```
+→ `chroma_db/` persist qua deploys. Có thể thêm disk thứ 2 cho `docs/uploaded/`.
+
+### Khuyến nghị thực tế
+
+| Use case | Persistence strategy |
 |---|---|
-| `LLMContextFrame` | Kích hoạt LLM xử lý context hiện tại |
-| `TextFrame` | Chunk text từ LLM streaming |
-| `LLMContextAssistantTimestampFrame` | LLM đã hoàn thành một lượt trả lời |
-| `EndFrame` | Kết thúc toàn bộ pipeline |
-| `FunctionCallResultProperties` | Metadata kết quả của tool call |
-
-### Pipeline trong dự án này
-
-```
-┌──────────────┐    ┌──────────────┐    ┌───────────────────┐    ┌──────────────────┐
-│   user_agg   │───▶│     llm      │───▶│   assistant_agg   │───▶│    collector     │
-│              │    │              │    │                   │    │                  │
-│ Nhận input   │    │ Gọi Groq API │    │ Gom response      │    │ Phát hiện khi   │
-│ từ context   │    │ Xử lý tool   │    │ Cập nhật context  │    │ nào pipeline     │
-│              │    │ calls        │    │                   │    │ nên kết thúc     │
-└──────────────┘    └──────────────┘    └───────────────────┘    └──────────────────┘
-```
-
-**`user_agg` (LLMContextAggregatorPair.user())**
-- Nhận `LLMContextFrame` chứa context đầy đủ
-- Chuẩn bị input cho LLM
-
-**`llm` (OpenAILLMService)**
-- Gọi Groq/Ollama với messages + tools
-- Khi nhận tool_call response → tự động gọi handler đã đăng ký
-- Đưa tool result vào context → chạy lại LLM
-
-**`assistant_agg` (LLMContextAggregatorPair.assistant())**
-- Gom các chunk text từ streaming
-- Cập nhật context với response của assistant
-
-**`collector` (OutputCollector)**
-- Theo dõi `LLMContextAssistantTimestampFrame`
-- Quyết định khi nào gửi `EndFrame`
-- Lưu kết quả cuối để trả về API
+| Demo / dev | Free tier OK. Auto-rebuild thêm ~30s cold start nhưng acceptable |
+| Production small | Free tier + commit `docs/*` vào git để giữ knowledge base qua redeploy |
+| Production có user upload | Starter plan với persistent disk |
+| Production heavy | Move chroma sang managed (Pinecone, Qdrant Cloud, Weaviate Cloud) — out of scope |
 
 ---
 
-## 9. Hai tool cụ thể
+## 12. Trade-offs & Hạn chế
 
-### Tool 1: `get_building_info`
-
-**Mục đích:** Lấy thông tin chi tiết một tòa nhà từ MongoDB khi LLM cần trả lời câu hỏi về nó.
-
-**Khi nào LLM gọi:** Người dùng hỏi về mô tả, dịch vụ, số tầng, khoa của một tòa nhà cụ thể.
-
-**Tham số:**
-```json
-{ "key": "thu-vien" }
-```
-
-**Luồng:**
-```
-LLM gọi tool → handler fetch MongoDB → trả JSON chi tiết →
-LLM đọc JSON → sinh câu trả lời tự nhiên bằng tiếng Việt
-```
-
-**run_llm = True (mặc định):** LLM sẽ chạy lại sau khi nhận data để sinh text trả lời.
+| Hạn chế | Workaround / Note |
+|---|---|
+| Render free tier không persist `docs/uploaded/` + `chroma_db/` | Commit vào git, hoặc upgrade Starter plan |
+| HF embed model ~540MB cold start | Pre-warm ở `api.py:startup`. Render lần deploy đầu chậm ~5 phút |
+| PDF extract format kém với tables | `pypdf` cơ bản. PDF tables phức tạp → khuyến nghị convert markdown thủ công trước khi upload |
+| LLM stochastic — đôi khi inconsistent | Bump retry, hoặc dùng `temperature=0` (hiện 0.3) |
+| Tiếng Việt embedding chưa hoàn hảo cho mọi case | Combine BM25 + boost. Vẫn tốt hơn semantic-only |
+| DDG rate limit / chậm | Switch sang Tavily nếu cần (set `TAVILY_API_KEY`) |
+| Pipeline timeout 30s | Tăng `CHATBOT_TIMEOUT_SECS` nếu chained 2 tool calls quá lâu |
 
 ---
 
-### Tool 2: `trigger_navigation`
+## 13. Để thuyết trình — Tóm tắt 5 phút
 
-**Mục đích:** Kích hoạt sự kiện điều hướng khi người dùng muốn được chỉ đường.
+### Slide 1: Vấn đề
+"Sinh viên HCMUT khó tra cứu thông tin trường, không biết khoa nào ở tòa nào, không biết hỏi ai về học phí. Cần chatbot tích hợp được vào app Unity 3D bản đồ trường."
 
-**Khi nào LLM gọi:** Người dùng dùng từ khóa chỉ đường: "đi đến", "chỉ đường", "dẫn tôi tới", "đường đến"...
+### Slide 2: Kiến trúc
+- 3 layer: Client → FastAPI → LLM/RAG/Internet
+- Chatbot có 2 tool: `trigger_navigation` + `search_info`
+- 1 endpoint `/chat?format=tmp` cho Unity
 
-**Tham số:**
-```json
-{ "destination_building": "Thư viện Trung tâm" }
-```
+### Slide 3: RAG
+- Knowledge base: upload `.md/.txt/.pdf` qua web UI
+- Index: chunk 500 chars → embed BK AI Lab Vietnamese encoder → Chroma
+- Retrieve: hybrid BM25 + semantic, RRF merge, boost user files
+- Quality: 6/7 query đúng building, 100% query curriculum trả lời đúng số tín chỉ
 
-**Luồng:**
-```
-LLM gọi tool → handler lưu NavigationResult vào collector →
-result_callback(run_llm=False) → EndFrame ngay lập tức →
-API trả {"type": "navigation", "content": {...}}
-```
+### Slide 4: 3 Luồng
+- Luồng 1: Navigation (có guardrail anti-hallucination)
+- Luồng 2: Info — RAG trước, code tự fallback Internet (DuckDuckGo)
+- Luồng 3: "Không tìm thấy" — chỉ khi cả 2 fail
 
-**run_llm = False:** Pipeline kết thúc ngay, LLM không sinh thêm text nào. Navigation event được trả thẳng về client để xử lý (ví dụ: C# backend trigger map navigation).
+### Slide 5: Unity Integration
+- DeepSeek output markdown
+- Backend convert sang TMP rich text (`<b>`, `<color>`, `<link>`)
+- Unity TextMeshPro render trực tiếp
 
----
-
-## 10. OutputCollector — logic kết thúc pipeline
-
-Đây là phần **tinh tế nhất** của hệ thống. Pipeline phải biết khi nào kết thúc, nhưng không đơn giản vì:
-
-- Nếu LLM gọi tool → nó **chưa xong**, phải đợi tool result rồi LLM chạy lại
-- Nếu LLM trả text → nó **đã xong**, cần gửi EndFrame
-
-### Logic phán quyết
-
-```python
-# Khi nhận LLMContextAssistantTimestampFrame (LLM vừa hoàn thành một lượt):
-last_msg = context.messages[-1 assistant message]
-
-if last_msg.tool_calls and not last_msg.content:
-    # → Là tool call, CHƯA xong, đợi
-    pass
-else:
-    # → Là text response, ĐÃ xong
-    await task.queue_frame(EndFrame())
-```
-
-### Tại sao không dùng `LLMFullResponseEndFrame`?
-
-Vì LLM có thể hoàn thành **nhiều lần** trong một request (mỗi lần gọi tool là một lượt LLM). `LLMContextAssistantTimestampFrame` cho phép kiểm tra **ngữ cảnh** của lượt vừa xong, quyết định chính xác hơn.
+### Slide 6: Demo flow
+Live demo 4-5 query:
+1. "Khoa Cơ khí ở tòa nào" → Tòa B11 (RAG hit, ~2s)
+2. "Chỉ đường tới Khoa Cơ khí" → trigger_navigation Tòa B11 (catalog resolve)
+3. "Hiệu trưởng HCMUT là ai" → search_info auto fallback internet (~4s)
+4. "Tổng tín chỉ KHMT" → 128 (curriculum file user upload)
+5. "Phòng F1.05" → bot từ chối "không biết tòa nào" (anti-hallucination)
 
 ---
 
-## 11. Token Optimization
+## 14. Tham khảo nhanh
 
-### Vấn đề
-
-Mỗi tòa nhà có `mo_ta` dài ~100 từ. Nếu nhét full data của 20 tòa nhà vào system prompt:
-- 20 × ~150 token = 3,000 token **mỗi request**
-- Với Groq free tier: giới hạn 30,000 token/phút → chỉ xử lý được ~10 request/phút
-
-### Giải pháp: Lazy Loading qua Function Calling
-
-```
-System prompt chỉ chứa:
-  - key=`A4` → Tòa nhà A4           (~8 token)
-  - key=`thu-vien` → Thư viện       (~8 token)
-  - key=`ky-tuc-xa` → Ký túc xá    (~8 token)
-  → Tổng: ~80 token cho 10 tòa nhà
-
-Chi tiết chỉ được fetch khi LLM cần:
-  get_building_info("thu-vien") → ~150 token (chỉ request đó)
-```
-
-**Kết quả:** ~80% tiết kiệm token trên các request không cần chi tiết.
-
----
-
-## 12. Tóm tắt nhanh cho phản biện
-
-**Q: LLM biết khi nào gọi tool nào?**
-> LLM được cung cấp `description` rõ ràng cho từng tool trong system prompt và tool schema. Description của `trigger_navigation` chỉ rõ "KHI VÀ CHỈ KHI người dùng muốn được chỉ đường". LLM dùng ngữ nghĩa câu hỏi để phân loại.
-
-**Q: Nếu LLM gọi sai tool thì sao?**
-> Handler chỉ thực thi logic thuần (fetch DB / lưu NavigationResult), không có side effect nguy hiểm. Worst case: trả lời sai → UX kém nhưng không crash hệ thống.
-
-**Q: Tại sao dùng Pipecat thay vì gọi LLM API trực tiếp?**
-> Pipecat xử lý vòng lặp tool-call/result tự động, quản lý context state, và thiết kế sẵn cho streaming. Nếu gọi thẳng API, phải tự code toàn bộ vòng lặp này.
-
-**Q: Tại sao dùng OpenAILLMService cho cả Ollama lẫn Groq?**
-> Ollama expose endpoint `/v1` theo chuẩn OpenAI API. Groq cũng dùng chuẩn này. Một service duy nhất handle cả hai chỉ bằng cách đổi `base_url` và `api_key` trong `.env`.
-
-**Q: Lịch sử hội thoại được lưu ở đâu?**
-> Không lưu server-side. Client (frontend Vue hoặc C# backend) giữ `history` và gửi kèm mỗi request. Server stateless hoàn toàn — dễ scale horizontal.
-
-**Q: Token optimization tiết kiệm được bao nhiêu?**
-> System prompt với full data ~3,000 token/request. Với lazy loading chỉ ~80-150 token. Tiết kiệm ~95% trên request không cần chi tiết (câu hỏi chung, điều hướng).
+- **API docs**: `http://localhost:8000/swagger` (FastAPI auto)
+- **Setup**: [CLAUDE.md](CLAUDE.md)
+- **Deploy**: [DEPLOY.md](DEPLOY.md)
+- **Code**: [bot.py](bot.py) (core), [rag.py](rag.py) (retrieval)

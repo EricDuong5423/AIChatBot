@@ -2,22 +2,53 @@ services:
   - type: web
     name: hcmut-chatbot
     env: python
-    buildCommand: pip install -r requirements.txt && cd frontend && npm ci && npm run build
+    plan: free
+    # Build: cài Python deps + build frontend → dist/
+    buildCommand: |
+      pip install -r requirements.txt
+      cd frontend && npm ci && npm run build
+    # Start: uvicorn warmup RAG ở startup event (api.py @app.on_event("startup")).
+    # Nếu chroma_db/ chưa có (lần deploy đầu hoặc free tier mất disk) → auto build từ docs/.
     startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+
+    # ── PERSISTENT DISK ─────────────────────────────────────────────────────
+    # FREE plan KHÔNG có persistent disk → mỗi lần deploy/restart:
+    #   - chroma_db/ bị xóa → auto rebuild từ docs/ khi startup (~10-30s)
+    #   - docs/uploaded/ KHÔNG được giữ (chỉ docs/* trong git mới persist)
+    #
+    # Để giữ uploads + skip rebuild, nâng STARTER plan ($7/month) và uncomment:
+    # disk:
+    #   name: data
+    #   mountPath: /opt/render/project/src/chroma_db
+    #   sizeGB: 1
+    # ────────────────────────────────────────────────────────────────────────
+
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.0"
+
+      # ── LLM backend (DeepSeek) ────────────────────────────────────────────
       - key: OLLAMA_BASE_URL
-        sync: false
+        value: https://api.deepseek.com
       - key: OLLAMA_MODEL
-        sync: false
+        value: deepseek-chat
       - key: LLM_API_KEY
-        sync: false
-      - key: MONGODB_URI
-        sync: false
-      - key: MONGODB_DB_NAME
-        sync: false
+        sync: false   # set thủ công trong Render dashboard (sk-xxx)
+
+      # ── Auth ──────────────────────────────────────────────────────────────
       - key: CHATBOT_API_KEY
-        sync: false
+        sync: false   # set thủ công, dùng `openssl rand -hex 32` tạo
+
+      # ── CORS ──────────────────────────────────────────────────────────────
+      # Đặt thành domain frontend public cho production (vd https://app.example.com)
       - key: CHATBOT_ALLOWED_ORIGINS
+        value: "*"
+
+      # ── Behavior ──────────────────────────────────────────────────────────
+      - key: CHATBOT_TIMEOUT_SECS
+        value: "30"
+
+      # ── (Optional) Tavily — nếu set → search internet ~10x nhanh hơn DDG ──
+      # Đăng ký free 1000 req/tháng tại https://tavily.com
+      - key: TAVILY_API_KEY
         sync: false

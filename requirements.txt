@@ -4,9 +4,29 @@ pipecat-ai[openai]>=0.0.50
 # HTTP server
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9       # FastAPI multipart/form-data (upload file)
 
-# MongoDB async driver
-motor>=3.3.0
+# PDF text extraction (cho /docs/upload)
+pypdf>=4.0.0
 
 # Tiện ích
 python-dotenv>=1.0.0
+
+# RAG: LangChain + Chroma + HuggingFace embeddings (local, multilingual)
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-huggingface>=0.1.0
+langchain-chroma>=0.1.0
+langchain-text-splitters>=0.3.0
+sentence-transformers>=3.0.0
+rank_bm25>=0.2.2              # hybrid retrieval (BM25 keyword + semantic)
+
+# Crawler — Playwright vì hcmut.edu.vn là SPA (JS render)
+# Sau pip install, chạy: python -m playwright install chromium
+playwright>=1.45.0
+beautifulsoup4>=4.12.0
+html2text>=2024.2.26
+requests>=2.31.0
+
+# Web search (Phase 3 — fallback khi RAG không tìm thấy)
+ddgs>=9.0.0
