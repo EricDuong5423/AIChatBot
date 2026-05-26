@@ -16,16 +16,12 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
-# ── RAG runtime data (regenerable từ docs/) ──────────────────────────────
-# chroma_db re-build từ docs/ qua scripts/build_index.py hoặc startup auto.
-# KHÔNG commit (file binary lớn, không cần version control).
 chroma_db/
 
-# Nếu muốn giữ uploads qua redeploy Render free tier, BỎ ignore docs/uploaded/
-# (xóa dòng dưới rồi commit files). Mặc định ignore vì là user data ephemeral.
-docs/uploaded/
+# docs/uploaded/ ĐƯỢC commit để Render free tier giữ data qua redeploy.
+# Nếu muốn ignore (vd local dev không commit user upload), uncomment dòng dưới:
+# docs/uploaded/
 
-# HuggingFace + Playwright cache (nằm trong ~/.cache, nhưng phòng case ENV xếp đâu đó)
 .cache/
 
 # ── Frontend ─────────────────────────────────────────────────────────────
