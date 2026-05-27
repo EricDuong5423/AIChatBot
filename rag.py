@@ -5,7 +5,8 @@ Public API:
     build_vectorstore()            — index lại toàn bộ docs/ → chroma_db/
     query_vectorstore(query, k=3)  — search top-k chunks liên quan
 
-Embedding: HuggingFace multilingual (chạy local, không cần API key).
+Embedding: Jina v3 API (multilingual, 1024D) — gọi REST, không load model local.
+Retrieval: hybrid BM25 (keyword) + dense (Jina) merge bằng RRF.
 Vector store: Chroma persistent ở thư mục ./chroma_db/.
 """
 

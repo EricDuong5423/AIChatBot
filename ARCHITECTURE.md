@@ -178,6 +178,70 @@ flowchart LR
     CANCEL --> FALLBACK["Return text:<br/>Mình chưa phản hồi kịp trong 30s"]
 ```
 
+### 4.4 Pipecat Pipeline — cấu trúc nội bộ
+
+`run_chatbot()` ([bot.py:538](bot.py)) dựng một **Pipecat pipeline** mỗi request. Pipecat
+là framework điều phối dialog theo mô hình **frame** chạy qua chuỗi **FrameProcessor**
+nối tiếp. Mỗi xử lý là 1 processor; data (text, context, tool call) bọc trong các `Frame`
+được đẩy tuần tự qua pipeline.
+
+```mermaid
+flowchart LR
+    subgraph PIPE["Pipeline([...]) — chuỗi 4 processor"]
+        direction LR
+        UA["user_agg<br/>LLMContext user side<br/>gom user message"]
+        LLM["OpenAILLMService<br/>gọi DeepSeek<br/>tool calling + stream"]
+        AA["assistant_agg<br/>LLMContext assistant side<br/>gom response vào context"]
+        OC["OutputCollector<br/>custom FrameProcessor<br/>bắt EndFrame + result"]
+        UA --> LLM --> AA --> OC
+    end
+
+    PUSH["_push_message()<br/>add user msg<br/>queue LLMContextFrame"] --> UA
+    LLM -.->|"tool_call frame"| TOOL["register_function handler<br/>trigger_navigation / search_info"]
+    TOOL -.->|"result_callback"| LLM
+    OC -->|"queue_frame"| END["EndFrame<br/>kết thúc task"]
+
+    style LLM fill:#fef3c7
+    style OC fill:#dbeafe
+    style TOOL fill:#fce7f3
+```
+
+**Các thành phần dựng trong `run_chatbot()`**:
+
+| Thành phần | Vai trò |
+|---|---|
+| `LLMContext(messages, tools)` | Source of truth — chứa system prompt + history + tools schema. Mọi processor đọc/ghi vào đây |
+| `LLMContextAggregatorPair(context)` | Tách thành `user_agg` (gom message user) + `assistant_agg` (gom response LLM vào context) |
+| `OpenAILLMService` | Gọi DeepSeek qua OpenAI-compatible API, stream text + emit tool call frame |
+| `OutputCollector` | Processor cuối — phát hiện response xong → queue `EndFrame`, expose `.result` |
+| `PipelineTask` + `PipelineRunner` | Chạy pipeline; `runner.run(task)` là coroutine chính được `asyncio.wait_for` bọc timeout |
+
+**Vòng đời 1 request** (frame flow):
+
+1. `_push_message()` add user message vào context → queue 1 `LLMContextFrame` vào đầu pipeline
+2. `user_agg` nhận, đẩy context tới `OpenAILLMService`
+3. **LLM round 1**: DeepSeek đọc context + tools → quyết định
+   - Nếu **gọi tool** → emit tool call → Pipecat dispatch tới handler đã `register_function`
+   - Handler chạy (RAG/internet/nav) → `params.result_callback(result, properties)` đẩy kết quả về context
+   - `FunctionCallResultProperties(run_llm=True/False)` quyết định có chạy LLM round 2 không
+4. **LLM round 2** (nếu `run_llm=True`): DeepSeek đọc tool result → sinh text trả lời
+5. `assistant_agg` gom text/tool_calls vào context messages
+6. `OutputCollector` bắt `LLMContextAssistantTimestampFrame`:
+   - Nếu message cuối là **tool call chưa có text** → CHỜ (không kết thúc sớm)
+   - Nếu là **text response hoàn chỉnh** → `task.queue_frame(EndFrame())` kết thúc
+7. `runner.run(task)` return → đọc `collector.result` → `{type, content}`
+
+**Vì sao cần `OutputCollector` tự quyết EndFrame?**
+Pipeline không tự biết khi nào "xong" vì 1 turn có thể là 1 round (text thẳng) hoặc 2
+round (tool call → text). Nếu gửi `EndFrame` ngay sau round 1, pipeline tắt khi LLM vừa
+gọi tool mà chưa kịp đọc kết quả. Logic ở [bot.py:258-272](bot.py) check "message cuối
+có phải tool call không có text không" để tránh tắt sớm.
+
+**Vì sao mỗi request dựng pipeline mới?**
+Stateless — history truyền qua param `conversation_history`, không giữ state giữa các
+request. Đơn giản, tránh race condition khi nhiều client gọi đồng thời. Trade-off: overhead
+dựng object nhỏ (~ms), không đáng kể so với LLM round-trip (~1-3s).
+
 ---
 
 ## 5. 3 Luồng quyết định (Decision Flow)
