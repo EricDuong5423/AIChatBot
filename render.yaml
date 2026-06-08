@@ -53,6 +53,13 @@ services:
       - key: CHATBOT_TIMEOUT_SECS
         value: "30"
 
+      # ── Vector database (Supabase pgvector — persistent, không mất khi restart) ─
+      # Dùng Session Pooler URL (IPv4 compatible):
+      # postgresql+psycopg://postgres.[ref]:[password]@aws-1-ap-south-1.pooler.supabase.com:5432/postgres
+      # Lấy từ: Supabase Connect → Session Pooler → đổi prefix postgresql:// → postgresql+psycopg://
+      - key: DATABASE_URL
+        sync: false
+
       # ── (Optional) Tavily — nếu set → search internet ~10x nhanh hơn DDG ──
       # Đăng ký free 1000 req/tháng tại https://tavily.com
       - key: TAVILY_API_KEY

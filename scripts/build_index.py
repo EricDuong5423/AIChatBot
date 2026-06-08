@@ -1,5 +1,8 @@
 """
-scripts/build_index.py — Index docs/ thành Chroma vector store (chroma_db/).
+scripts/build_index.py — Index docs/ → Supabase pgvector (thay Chroma).
+
+Yêu cầu: DATABASE_URL trong .env (postgresql+psycopg://...)
+         Supabase đã bật extension: CREATE EXTENSION IF NOT EXISTS vector;
 
 Chạy từ thư mục gốc của project:
     python scripts/build_index.py
@@ -23,4 +26,4 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 if __name__ == "__main__":
     n = build_vectorstore()
-    print(f"\n[ok] Indexed {n} chunks -> chroma_db/")
+    print(f"\n[ok] Indexed {n} chunks -> Supabase pgvector")

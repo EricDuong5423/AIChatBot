@@ -13,14 +13,15 @@ pypdf>=4.0.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 
-# RAG: LangChain + Chroma. Embedding qua Jina API (không cần local model).
+# RAG: LangChain + Supabase pgvector. Embedding qua Jina API (không cần local model).
 # (Bỏ sentence-transformers + langchain-huggingface để giảm RAM ~700MB,
 #  tránh kéo theo torch + nvidia-cuda-* — đây là lý do OOM trên Render free tier)
 langchain>=0.3.0
 langchain-community>=0.3.0
-langchain-chroma>=0.1.0
+langchain-postgres>=0.0.12
 langchain-text-splitters>=0.3.0
 rank_bm25>=0.2.2              # hybrid retrieval (BM25 keyword + semantic)
+psycopg[binary]>=3.1.0        # PostgreSQL driver cho pgvector (Supabase)
 
 # URL crawl + HTML parse (cho /docs/crawl-url)
 beautifulsoup4>=4.12.0

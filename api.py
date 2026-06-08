@@ -1,14 +1,4 @@
-"""
-api.py — FastAPI chatbot service, được gọi bởi C# backend (CO4029_BE).
-
-Endpoints:
-  POST /chat    — nhận {message, history} → trả {type, content}
-  GET  /health  — health check cho C# backend
-
-Buildings info được lưu dưới dạng markdown trong docs/buildings/ và truy cập
-qua RAG (tool search_knowledge). Không còn MongoDB.
-"""
-
+import asyncio
 import logging
 import os
 
@@ -17,9 +7,11 @@ from fastapi import FastAPI, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from typing import Optional
 
 from auth import verify_api_key
 from bot import run_chatbot
+from chat_history import fetch_history, save_exchange
 from formatter import convert as convert_format
 from rag import query_vectorstore
 from routers.docs import router as docs_router
@@ -31,10 +23,9 @@ app = FastAPI(
     title="HCMUT Chatbot Service",
     description="Internal AI service — được gọi bởi CO4029_BE",
     version="1.0.0",
-    docs_url="/swagger",  # /docs reserved cho knowledge base router
+    docs_url="/swagger",
 )
 
-# ── CORS: cho phép C# backend gọi vào ───────────────────────────────────────
 _raw_origins = os.getenv("CHATBOT_ALLOWED_ORIGINS", "*")
 allowed_origins = [o.strip() for o in _raw_origins.split(",")]
 
@@ -50,36 +41,31 @@ app.include_router(docs_router)
 
 @app.on_event("startup")
 async def _warmup_rag() -> None:
-    """
-    Khởi tạo RAG khi server start:
-    1. Nếu chưa có chroma_db/ nhưng có docs/ → tự build index (cho Render cold deploy)
-    2. Warm up embedding model qua 1 query "warmup" để query đầu không tốn ~10s
-    """
     import asyncio as _asyncio
-    import os
-    from rag import build_vectorstore, CHROMA_DIR, DOCS_DIR
+    from pathlib import Path
+    from rag import build_vectorstore, DATABASE_URL, DOCS_DIR
 
-    has_chroma = os.path.isdir(CHROMA_DIR) and any(os.scandir(CHROMA_DIR))
-    has_docs = os.path.isdir(DOCS_DIR) and any(p.suffix == ".md" for p in __import__("pathlib").Path(DOCS_DIR).rglob("*.md"))
+    if not DATABASE_URL:
+        logger.warning("DATABASE_URL chưa set — RAG disabled (set trong .env hoặc Render dashboard)")
+        return
 
-    if not has_chroma and has_docs:
-        logger.info("chroma_db trống nhưng docs/ có .md → tự build index khi startup")
-        try:
-            n = await _asyncio.to_thread(build_vectorstore)
-            logger.info("Auto-built index: %d chunks", n)
-        except Exception as e:
-            logger.warning("Auto-build index lỗi: %s", e)
+    has_docs = os.path.isdir(DOCS_DIR) and any(
+        Path(DOCS_DIR).rglob("*.md")
+    )
 
     try:
         await _asyncio.to_thread(query_vectorstore, "warmup", 1)
-        logger.info("RAG warmup done (embeddings cached)")
-    except Exception as e:
-        logger.warning("RAG warmup failed: %s", e)
-
-
-# ============================================================================
-# REQUEST / RESPONSE — khớp với ChatbotService.cs trong CO4029_BE
-# ============================================================================
+        logger.info("RAG warmup done (Supabase pgvector OK)")
+    except Exception:
+        if has_docs:
+            logger.info("Supabase collection trống → tự build index từ docs/")
+            try:
+                n = await _asyncio.to_thread(build_vectorstore)
+                logger.info("Auto-built index: %d chunks", n)
+            except Exception as e:
+                logger.warning("Auto-build index lỗi: %s", e)
+        else:
+            logger.warning("RAG warmup failed và không có docs/ để build — upload docs trước")
 
 class Message(BaseModel):
     """Một lượt hội thoại, gửi từ C# backend."""
@@ -89,17 +75,35 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     """
-    Body mà C# ChatbotService gửi lên:
-        {
-          "message": "Chỉ tôi đường đến thư viện",
-          "history": [
-            {"role": "user",      "content": "..."},
-            {"role": "assistant", "content": "..."}
-          ]
-        }
+    Body mà C# ChatbotService gửi lên.
+
+    Có 2 chế độ:
+    1. Truyền session_id + user_id (khuyến nghị — C# backend dùng cách này):
+       {
+         "message":    "Chỉ tôi đường đến thư viện",
+         "session_id": "uuid-của-phiên-chat",   // = id bảng history (cũng nhận "history_id")
+         "user_id":    "uuid-của-user"          // optional, cho logging/trace
+       }
+       → Python tự fetch chatbox từ Supabase theo session, chạy LLM, rồi tự lưu
+         cả user message + assistant response trở lại chatbox.
+
+    2. Truyền history array (backward compat, không lưu lại Supabase):
+       {
+         "message": "...",
+         "history": [{"role": "user", "content": "..."}, ...]
+       }
     """
     message: str = Field(..., min_length=1)
-    history: list[Message] = Field(default_factory=list)
+    # Phiên chat — nhận cả "session_id" lẫn "history_id" (cùng là UUID bảng history)
+    session_id: Optional[str] = None
+    history_id: Optional[str] = None
+    user_id: Optional[str] = None           # UUID của user (logging/trace only)
+    history: list[Message] = Field(default_factory=list)  # fallback khi không có session
+
+    @property
+    def session(self) -> Optional[str]:
+        """UUID phiên chat — ưu tiên session_id, fallback history_id."""
+        return self.session_id or self.history_id
 
 
 class TextResponse(BaseModel):
@@ -159,13 +163,30 @@ async def chat(
       "text"       → content là string đã convert theo format
       "navigation" → content là dict {event, destination_building}, không convert
     """
-    history = [{"role": m.role, "content": m.content} for m in request.history]
+    # Nếu có session (session_id/history_id) → fetch lịch sử từ Supabase, bỏ qua history array
+    sid = request.session
+    if sid:
+        history = await asyncio.to_thread(fetch_history, sid)
+        logger.debug("Fetched %d messages for session=%s user=%s",
+                     len(history), sid, request.user_id)
+    else:
+        history = [{"role": m.role, "content": m.content} for m in request.history]
 
     try:
         result = await run_chatbot(request.message, history)
     except Exception:
         logger.exception("Chatbot pipeline error")
         raise HTTPException(status_code=500, detail="Chatbot pipeline failed")
+
+    # Lưu cặp user+assistant vào chatbox (đồng bộ — đảm bảo lần chat kế có đủ context).
+    # Lưu RAW markdown (trước khi convert format) để DB luôn giữ bản gốc.
+    if sid:
+        if result.get("type") == "navigation":
+            dest = result["content"].get("destination_building", "?")
+            to_save = f"[Dẫn đường: {dest}]"
+        else:
+            to_save = result.get("content", "")
+        await asyncio.to_thread(save_exchange, sid, request.message, to_save)
 
     # Chỉ convert text content; navigation giữ nguyên (dict structured data)
     if result.get("type") == "text" and format != "md":

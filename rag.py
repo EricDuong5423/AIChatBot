@@ -1,24 +1,23 @@
 """
-rag.py — RAG module: load docs/ → embed → Chroma vector store → retrieve.
+rag.py — RAG module: load docs/ → embed → Supabase pgvector → retrieve.
 
 Public API:
-    build_vectorstore()            — index lại toàn bộ docs/ → chroma_db/
+    build_vectorstore()            — index lại toàn bộ docs/ → Supabase pgvector
     query_vectorstore(query, k=3)  — search top-k chunks liên quan
 
 Embedding: Jina v3 API (multilingual, 1024D) — gọi REST, không load model local.
 Retrieval: hybrid BM25 (keyword) + dense (Jina) merge bằng RRF.
-Vector store: Chroma persistent ở thư mục ./chroma_db/.
+Vector store: Supabase pgvector (persistent, không mất khi Render restart).
 """
 
 import logging
 import os
 import re
-import shutil
 from pathlib import Path
 from typing import Optional
 
 import requests
-from langchain_chroma import Chroma
+from langchain_postgres import PGVector
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -26,8 +25,9 @@ from rank_bm25 import BM25Okapi
 
 # ── Cấu hình ────────────────────────────────────────────────────────────────
 DOCS_DIR = "docs"
-CHROMA_DIR = "chroma_db"
 COLLECTION = "hcmut"
+# postgresql+psycopg://user:pass@db.xxx.supabase.co:5432/postgres
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 # Jina v3 — multilingual API embedding, 1024D. Free 1M token/tháng tại jina.ai.
 # Lý do dùng API thay vì local model: Render free tier 512MB RAM không đủ
 # cho HF model (~540MB). Jina API: 0 RAM local, chất lượng MTEB top.
@@ -86,10 +86,11 @@ class JinaEmbeddings(Embeddings):
 
 _embeddings: Optional[JinaEmbeddings] = None
 
-# BM25 cache: build từ chunks hiện tại của Chroma. Invalidate khi build_vectorstore.
+# BM25 cache — invalidate bằng version counter (tăng sau mỗi lần build_vectorstore)
 _bm25: Optional[BM25Okapi] = None
 _bm25_chunks: list[Document] = []
-_bm25_built_at: float = 0.0  # mtime của chroma_db để detect rebuild
+_bm25_version: int = 0        # tăng sau mỗi rebuild
+_bm25_built_version: int = -1  # version lúc build BM25 cache
 
 
 def _get_embeddings() -> JinaEmbeddings:
@@ -152,10 +153,13 @@ def _load_docs() -> list[Document]:
 
 def build_vectorstore() -> int:
     """
-    Rebuild Chroma DB từ docs/. Clear collection (qua Chroma API) thay vì xóa thư mục
-    — để hoạt động ngay cả khi có connection SQLite đang mở (warmup, ongoing query, etc.).
+    Rebuild pgvector collection từ docs/ → Supabase.
+    pre_delete_collection=True: xóa toàn bộ embeddings cũ rồi reindex.
     Trả về số chunk đã index.
     """
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL chưa set — thêm vào .env trước khi build.")
+
     docs = _load_docs()
     if not docs:
         raise RuntimeError(f"Không tìm thấy doc nào trong {DOCS_DIR}/ — upload file hoặc chạy scripts/crawl.py trước.")
@@ -171,31 +175,22 @@ def build_vectorstore() -> int:
     logger.info("Split into %d chunks (chunk_size=%d, overlap=%d)",
                 len(chunks), CHUNK_SIZE, CHUNK_OVERLAP)
 
-    # Mở store hiện có (hoặc tạo mới) — KHÔNG xóa filesystem
-    store = Chroma(
-        persist_directory=CHROMA_DIR,
+    logger.info("Uploading %d chunks to Supabase pgvector...", len(chunks))
+    PGVector.from_documents(
+        documents=chunks,
+        embedding=_get_embeddings(),
         collection_name=COLLECTION,
-        embedding_function=_get_embeddings(),
+        connection=DATABASE_URL,
+        pre_delete_collection=True,
+        use_jsonb=True,
     )
+    logger.info("Indexed %d chunks -> Supabase pgvector (collection=%s)", len(chunks), COLLECTION)
 
-    # Clear toàn bộ documents cũ trong collection
-    try:
-        existing = store._collection.get(include=[])  # chỉ lấy ids
-        if existing.get("ids"):
-            store._collection.delete(ids=existing["ids"])
-            logger.info("Cleared %d old chunks from collection", len(existing["ids"]))
-    except Exception as e:
-        logger.warning("Clear collection error (ignored): %s", e)
-
-    # Thêm chunks mới
-    store.add_documents(chunks)
-    logger.info("Indexed %d chunks -> %s/", len(chunks), CHROMA_DIR)
-
-    # Invalidate BM25 cache để build lại ở query đầu tiên
-    global _bm25, _bm25_chunks, _bm25_built_at
+    # Invalidate BM25 cache
+    global _bm25, _bm25_chunks, _bm25_version
     _bm25 = None
     _bm25_chunks = []
-    _bm25_built_at = 0.0
+    _bm25_version += 1
 
     return len(chunks)
 
@@ -212,31 +207,38 @@ def _tokenize_vi(text: str) -> list[str]:
 
 
 def _load_bm25() -> tuple[Optional[BM25Okapi], list[Document]]:
-    """Build BM25 index từ chunks trong Chroma. Cache trong memory."""
-    global _bm25, _bm25_chunks, _bm25_built_at
+    """
+    Build BM25 index từ chunks trong Supabase. Cache trong memory.
+    Fetch raw text từ langchain_pg_embedding table qua psycopg (không cần re-embed).
+    """
+    global _bm25, _bm25_chunks, _bm25_built_version, _bm25_version
 
-    if not os.path.exists(CHROMA_DIR):
-        return None, []
-
-    # Check rebuild detector: mtime of chroma sqlite
-    sqlite_path = os.path.join(CHROMA_DIR, "chroma.sqlite3")
-    current_mtime = os.path.getmtime(sqlite_path) if os.path.exists(sqlite_path) else 0.0
-
-    if _bm25 is not None and current_mtime == _bm25_built_at:
+    if _bm25 is not None and _bm25_version == _bm25_built_version:
         return _bm25, _bm25_chunks  # cache valid
 
-    logger.info("Building BM25 index from Chroma chunks…")
-    store = Chroma(
-        persist_directory=CHROMA_DIR,
-        collection_name=COLLECTION,
-        embedding_function=_get_embeddings(),
-    )
-    result = store._collection.get()
-    docs = result.get("documents", [])
-    metas = result.get("metadatas", [])
+    if not DATABASE_URL:
+        return None, []
+
+    import psycopg
+
+    # psycopg.connect dùng postgresql:// (không có +psycopg prefix của SQLAlchemy)
+    plain_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+
+    try:
+        logger.info("Building BM25 index from Supabase chunks...")
+        with psycopg.connect(plain_url) as conn:
+            rows = conn.execute("""
+                SELECT e.document, e.cmetadata
+                FROM langchain_pg_embedding e
+                JOIN langchain_pg_collection c ON e.collection_id = c.uuid
+                WHERE c.name = %s
+            """, (COLLECTION,)).fetchall()
+    except Exception as e:
+        logger.warning("BM25 load from Supabase failed: %s", e)
+        return None, []
 
     chunks: list[Document] = [
-        Document(page_content=d, metadata=m or {}) for d, m in zip(docs, metas)
+        Document(page_content=row[0], metadata=row[1] or {}) for row in rows
     ]
     if not chunks:
         return None, []
@@ -244,7 +246,7 @@ def _load_bm25() -> tuple[Optional[BM25Okapi], list[Document]]:
     tokenized = [_tokenize_vi(c.page_content) for c in chunks]
     _bm25 = BM25Okapi(tokenized)
     _bm25_chunks = chunks
-    _bm25_built_at = current_mtime
+    _bm25_built_version = _bm25_version
     logger.info("BM25 ready: %d chunks tokenized", len(chunks))
     return _bm25, _bm25_chunks
 
@@ -254,17 +256,21 @@ def query_vectorstore(query: str, k: int = 3) -> list[dict]:
     Hybrid search: BM25 (keyword) + dense embedding (semantic), merge bằng RRF.
     Bù điểm yếu của semantic-only cho tiếng Việt + keyword đặc thù.
     """
-    if not os.path.exists(CHROMA_DIR):
-        logger.warning("Chroma DB chưa tồn tại — chạy scripts/build_index.py hoặc upload doc trước")
+    if not DATABASE_URL:
+        logger.warning("DATABASE_URL chưa set — RAG disabled")
         return []
 
-    # Lấy top-k từ semantic search
-    store = Chroma(
-        persist_directory=CHROMA_DIR,
-        collection_name=COLLECTION,
-        embedding_function=_get_embeddings(),
-    )
-    vec_results = store.similarity_search(query, k=k * 2)  # over-fetch để merge
+    # Lấy top-k từ semantic search (pgvector HNSW)
+    try:
+        store = PGVector(
+            embeddings=_get_embeddings(),
+            collection_name=COLLECTION,
+            connection=DATABASE_URL,
+        )
+        vec_results = store.similarity_search(query, k=k * 2)  # over-fetch để merge
+    except Exception as e:
+        logger.warning("PGVector search failed: %s", e)
+        return []
 
     # Lấy top-k từ BM25
     bm25, bm25_chunks = _load_bm25()
