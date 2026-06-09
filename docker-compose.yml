@@ -1,0 +1,20 @@
+services:
+  chatbot:
+    build: .
+    image: hcmut-chatbot:latest
+    container_name: hcmut-chatbot
+    # Map cổng host 8000 → container 8000.
+    # Nếu đặt Nginx phía trước, đổi thành "127.0.0.1:8000:8000" để chỉ Nginx truy cập được.
+    ports:
+      - "8000:8000"
+    # Nạp toàn bộ biến môi trường từ .env (KHÔNG commit file này)
+    env_file:
+      - .env
+    # Tự khởi động lại khi crash hoặc VPS reboot
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

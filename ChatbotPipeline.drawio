@@ -1,168 +1,168 @@
-<mxfile host="app.diagrams.net">
-  <diagram name="Chatbot Pipeline" id="chatbot-pipeline">
-    <mxGraphModel dx="1134" dy="753" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1600" background="#ffffff" math="0" shadow="0">
-      <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-        <mxCell id="a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Câu hỏi người dùng" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="40" as="geometry" />
-        </mxCell>
-        <mxCell id="b" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Dựng system prompt" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="130" as="geometry" />
-        </mxCell>
-        <mxCell id="c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Ghép ngữ cảnh" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="220" as="geometry" />
-        </mxCell>
-        <mxCell id="d" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Gửi cho LLM" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="310" as="geometry" />
-        </mxCell>
-        <mxCell id="e" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="LLM quyết định" vertex="1">
-          <mxGeometry height="100" width="160" x="345" y="399" as="geometry" />
-        </mxCell>
-        <mxCell id="l1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#000000;" value="Trích xuất thông tin trong&lt;br&gt;yêu cầu chỉ đường" vertex="1">
-          <mxGeometry height="50" width="160" x="40" y="560" as="geometry" />
-        </mxCell>
-        <mxCell id="lg" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Kiểm tra xem yêu cầu&lt;br&gt;có phải tòa nhà ?" vertex="1">
-          <mxGeometry height="90" width="160" x="40" y="650" as="geometry" />
-        </mxCell>
-        <mxCell id="ikkrdwg3k8wHst2HS-u9-3" edge="1" parent="1" source="l2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000,#000000);" target="z">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="l2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Kích hoạt tools thay đổi kiểu trả về" vertex="1">
-          <mxGeometry height="50" width="160" x="40" y="790" as="geometry" />
-        </mxCell>
-        <mxCell id="m1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#000000;" value="Tra cứu thông tin" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="560" as="geometry" />
-        </mxCell>
-        <mxCell id="m2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Truy vấn RAG" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="653" as="geometry" />
-        </mxCell>
-        <mxCell id="m3" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="RAG hữu ích?&#xa;(&gt;=50% keyword)" vertex="1">
-          <mxGeometry height="100" width="160" x="345" y="740" as="geometry" />
-        </mxCell>
-        <mxCell id="n1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Tìm kiếm thông tin trên&lt;div&gt;Internet&lt;/div&gt;" vertex="1">
-          <mxGeometry height="50" width="170" x="560" y="765" as="geometry" />
-        </mxCell>
-        <mxCell id="m4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Nạp dữ liệu vào ngữ cảnh" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="893" as="geometry" />
-        </mxCell>
-        <mxCell id="m5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="LLM xử lý lần hai" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="981" as="geometry" />
-        </mxCell>
-        <mxCell id="2" edge="1" parent="1" source="m5" style="html=1;strokeColor=#000000;exitX=0;exitY=0.5;exitDx=0;exitDy=0;edgeStyle=orthogonalEdgeStyle;">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="237" y="1006" />
-              <mxPoint x="237" y="637" />
-            </Array>
-            <mxPoint x="121" y="637" as="targetPoint" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="3" connectable="0" parent="2" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Trả về thông tin khoa/phòng&amp;nbsp;đó ở tòa nào.&lt;/font&gt;" vertex="1">
-          <mxGeometry relative="1" x="0.0719" y="1" as="geometry">
-            <mxPoint x="1" y="106" as="offset" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="m6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Sinh câu trả lời" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="1072" as="geometry" />
-        </mxCell>
-        <mxCell id="m8" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" value="Còn cần gọi tool ?" vertex="1">
-          <mxGeometry height="100" width="160" x="345" y="1249" as="geometry" />
-        </mxCell>
-        <mxCell id="z" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#000000;" value="Trả về API" vertex="1">
-          <mxGeometry height="50" width="150" x="350" y="1436" as="geometry" />
-        </mxCell>
-        <mxCell id="ea" edge="1" parent="1" source="a" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="b">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="eb" edge="1" parent="1" source="b" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="c">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ec" edge="1" parent="1" source="c" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="d">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ed" edge="1" parent="1" source="d" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="e">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e_nav" edge="1" parent="1" source="e" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d6b656;fontColor=#000000;endArrow=classic;" target="l1" value="&lt;font style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255)); color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;Người dùng yêu cầu chỉ đường&lt;/font&gt;">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e_info" edge="1" parent="1" source="e" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;fontColor=#000000;endArrow=classic;" target="m1" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Hỏi thông tin&lt;/span&gt;&lt;/font&gt;">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e_chat" edge="1" parent="1" source="e" style="rounded=0;html=1;strokeColor=#9673a6;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=1;entryY=0.5;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;fillColor=#e1d5e7;" target="m6" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Hỏi chuyện thông thường&lt;/font&gt;">
-          <mxGeometry relative="1" x="-0.2365" as="geometry">
-            <mxPoint as="offset" />
-            <Array as="points">
-              <mxPoint x="790" y="450" />
-              <mxPoint x="790" y="1097" />
-            </Array>
-            <mxPoint x="501" y="1074" as="targetPoint" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="el1" edge="1" parent="1" source="l1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="lg">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="elg_ok" edge="1" parent="1" source="lg" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;fontColor=#ffffff;endArrow=classic;fillColor=#d5e8d4;" target="l2" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Là tòa nhà&lt;/font&gt;">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="elg_no" edge="1" parent="1" source="lg" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#ff6f6f;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="m1" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Khoa/Phòng thì truy&lt;/font&gt;&lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255)); color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;xuất thông tin&lt;/span&gt;">
-          <mxGeometry relative="1" x="0.2231" as="geometry">
-            <mxPoint as="offset" />
-            <Array as="points">
-              <mxPoint x="287" y="695" />
-              <mxPoint x="287" y="585" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="em1" edge="1" parent="1" source="m1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="m2">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="em2" edge="1" parent="1" source="m2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="m3">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="em3_ok" edge="1" parent="1" source="m3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;fontColor=#ffffff;endArrow=classic;fillColor=#d5e8d4;" target="m4" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Có&lt;/font&gt;">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="em3_no" edge="1" parent="1" source="m3" style="rounded=0;html=1;strokeColor=#b85450;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fillColor=#f8cecc;" target="n1" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Không&lt;/font&gt;">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="en1" edge="1" parent="1" source="n1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;exitX=0.5;exitY=1;entryX=1;entryY=0.5;" target="m4">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="645" y="915" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="em4" edge="1" parent="1" source="m4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="m5">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="em5" edge="1" parent="1" source="m5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" target="m6">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="em6" edge="1" parent="1" source="m6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="m8">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint x="380" y="1160" as="targetPoint" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="em8_yes" edge="1" parent="1" source="m8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=1;entryY=0.5;fillColor=#d5e8d4;" target="m5" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Có, chờ kết quả&lt;/font&gt;">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="540" y="1300" />
-              <mxPoint x="540" y="1005" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="em8_no" edge="1" parent="1" source="m8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;fontColor=#ffffff;endArrow=classic;fillColor=#f8cecc;" target="z" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Không, đã hoàn tất&lt;/font&gt;">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-      </root>
-    </mxGraphModel>
-  </diagram>
+<mxfile host="65bd71144e">
+    <diagram name="Chatbot Pipeline" id="chatbot-pipeline">
+        <mxGraphModel dx="864" dy="780" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1600" background="#ffffff" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="a" value="Câu hỏi người dùng" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="40" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="b" value="Dựng system prompt" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="130" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="c" value="Ghép ngữ cảnh" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="220" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="d" value="Gửi cho LLM" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="310" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="e" value="LLM quyết định" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="345" y="399" width="160" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="l1" value="Trích xuất thông tin trong&lt;br&gt;yêu cầu chỉ đường" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="560" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="lg" value="Kiểm tra xem yêu cầu&lt;br&gt;có phải tòa nhà ?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="650" width="160" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="ikkrdwg3k8wHst2HS-u9-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;strokeColor=light-dark(#000000,#000000);" parent="1" source="l2" target="z" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="l2" value="Kích hoạt tools thay đổi kiểu trả về" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="790" width="160" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="m1" value="Tra cứu thông tin" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="560" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="m2" value="Truy vấn RAG" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="653" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="m3" value="RAG hữu ích?&#xa;(&gt;=50% keyword)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="345" y="740" width="160" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="n1" value="Tìm kiếm thông tin trên&lt;div&gt;Internet&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="560" y="765" width="170" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="m4" value="Nạp dữ liệu vào ngữ cảnh" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="893" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="m5" value="LLM xử lý lần hai" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="981" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="2" style="html=1;strokeColor=#000000;exitX=0;exitY=0.5;exitDx=0;exitDy=0;edgeStyle=orthogonalEdgeStyle;" parent="1" source="m5" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="237" y="1006"/>
+                            <mxPoint x="237" y="637"/>
+                        </Array>
+                        <mxPoint x="121" y="637" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="3" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Trả về thông tin khoa/phòng&amp;nbsp;đó ở tòa nào.&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="2" connectable="0" vertex="1">
+                    <mxGeometry x="0.0719" y="1" relative="1" as="geometry">
+                        <mxPoint x="1" y="106" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="m6" value="Sinh câu trả lời" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="1072" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="m8" value="Còn cần gọi tool ?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e6e6e6;strokeColor=#666666;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="345" y="1249" width="160" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="z" value="Trả về API" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="350" y="1436" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="ea" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="a" target="b" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="eb" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="b" target="c" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ec" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="c" target="d" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="d" target="e" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_nav" value="&lt;font style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255)); color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;Người dùng yêu cầu chỉ đường&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d6b656;fontColor=#000000;endArrow=classic;" parent="1" source="e" target="l1" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_info" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Hỏi thông tin&lt;/span&gt;&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;fontColor=#000000;endArrow=classic;" parent="1" source="e" target="m1" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_chat" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Hỏi chuyện thông thường&lt;/font&gt;" style="rounded=0;html=1;strokeColor=#9673a6;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=1;entryY=0.5;entryDx=0;entryDy=0;edgeStyle=orthogonalEdgeStyle;fillColor=#e1d5e7;" parent="1" source="e" target="m6" edge="1">
+                    <mxGeometry x="-0.2365" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="790" y="450"/>
+                            <mxPoint x="790" y="1097"/>
+                        </Array>
+                        <mxPoint x="501" y="1074" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="el1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="l1" target="lg" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="elg_ok" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Là tòa nhà&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;fontColor=#ffffff;endArrow=classic;fillColor=#d5e8d4;" parent="1" source="lg" target="l2" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="elg_no" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Khoa/Phòng thì truy&lt;/font&gt;&lt;span style=&quot;background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255)); color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0));&quot;&gt;&amp;nbsp;xuất thông tin&lt;/span&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#ff6f6f;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" parent="1" source="lg" target="m1" edge="1">
+                    <mxGeometry x="0.2231" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                        <Array as="points">
+                            <mxPoint x="287" y="695"/>
+                            <mxPoint x="287" y="585"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="em1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="m1" target="m2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="em2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="m2" target="m3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="em3_ok" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Có&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;fontColor=#ffffff;endArrow=classic;fillColor=#d5e8d4;" parent="1" source="m3" target="m4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="em3_no" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Không&lt;/font&gt;" style="rounded=0;html=1;strokeColor=#b85450;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fillColor=#f8cecc;" parent="1" source="m3" target="n1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="en1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;exitX=0.5;exitY=1;entryX=1;entryY=0.5;" parent="1" source="n1" target="m4" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="645" y="915"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="em4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="m4" target="m5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="em5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;" parent="1" source="m5" target="m6" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="em6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#000000;fontColor=#000000;endArrow=classic;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="m6" target="m8" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="380" y="1160" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="em8_yes" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Có, chờ kết quả&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;fontColor=#ffffff;endArrow=classic;exitX=1;exitY=0.5;entryX=1;entryY=0.5;fillColor=#d5e8d4;" parent="1" source="m8" target="m5" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="540" y="1300"/>
+                            <mxPoint x="540" y="1005"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="em8_no" value="&lt;font style=&quot;color: light-dark(rgb(0, 0, 0), rgb(0, 0, 0)); background-color: light-dark(rgb(255, 255, 255), rgb(255, 255, 255));&quot;&gt;Không, đã hoàn tất&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;fontColor=#ffffff;endArrow=classic;fillColor=#f8cecc;" parent="1" source="m8" target="z" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
 </mxfile>

@@ -1,0 +1,36 @@
+# Secrets — KHÔNG bao giờ đưa vào image
+.env
+.env.local
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend — node_modules build lại trong stage riêng; dist build trong image
+frontend/node_modules/
+frontend/.vite/
+dist/
+
+# Vector store cũ (giờ dùng Supabase pgvector)
+chroma_db/
+
+# Git / IDE / OS
+.git/
+.gitignore
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# Docs deploy không cần trong image runtime
+DEPLOY.md
+DEPLOY-VPS.md
+ARCHITECTURE.md
+LLM_DECISION.md
+*.drawio

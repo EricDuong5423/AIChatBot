@@ -297,7 +297,7 @@ _NON_BUILDING_PATTERNS = [
     "ký túc xá", "ky tuc xa", "ktx",
     "thư viện", "thu vien",
     "hội trường", "hoi truong",
-    "oisp",  # OISP là đơn vị, không phải tòa
+    "oisp",
 ]
 
 
